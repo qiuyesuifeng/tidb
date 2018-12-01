@@ -48,8 +48,12 @@ type SortExec struct {
 	rowChunks *chunk.List
 	// rowPointer store the chunk index and row index for each row.
 	rowPtrs []chunk.RowPtr
-
 	memTracker *memory.Tracker
+
+	streamWindowSort bool
+
+	sterminated bool
+	chk *chunk.Chunk
 }
 
 // Close implements the Executor Close interface.
@@ -63,6 +67,9 @@ func (e *SortExec) Close() error {
 func (e *SortExec) Open(ctx context.Context) error {
 	e.fetched = false
 	e.Idx = 0
+	e.sterminated = false
+	e.chk = nil
+
 
 	// To avoid duplicated initialization for TopNExec.
 	if e.memTracker == nil {
@@ -74,6 +81,18 @@ func (e *SortExec) Open(ctx context.Context) error {
 
 // Next implements the Executor Next interface.
 func (e *SortExec) Next(ctx context.Context, chk *chunk.Chunk) error {
+	if !e.streamWindowSort {
+		return e.next(ctx, chk)
+	} else {
+		if e.sterminated {
+			return nil
+		}
+		e.sreset()
+		return e.snext(ctx, chk)
+	}
+}
+
+func (e *SortExec) next(ctx context.Context, chk *chunk.Chunk) error {
 	if e.runtimeStats != nil {
 		start := time.Now()
 		defer func() { e.runtimeStats.Record(time.Now().Sub(start), chk.NumRows()) }()
@@ -110,6 +129,74 @@ func (e *SortExec) Next(ctx context.Context, chk *chunk.Chunk) error {
 	return nil
 }
 
+func (e *SortExec) snext(ctx context.Context, chk *chunk.Chunk) error {
+	if e.runtimeStats != nil {
+		start := time.Now()
+		defer func() { e.runtimeStats.Record(time.Now().Sub(start), chk.NumRows()) }()
+	}
+	chk.Reset()
+	if !e.fetched {
+		err := e.fetchWindow(ctx)
+		if err != nil {
+			return errors.Trace(err)
+		}
+		e.initPointers()
+		e.initCompareFuncs()
+		allColumnExpr := e.buildKeyColumns()
+		if allColumnExpr {
+			sort.Slice(e.rowPtrs, e.keyColumnsLess)
+		} else {
+			e.buildKeyExprsAndTypes()
+			err = e.buildKeyChunks()
+			if err != nil {
+				return errors.Trace(err)
+			}
+			sort.Slice(e.rowPtrs, e.keyChunksLess)
+		}
+		e.fetched = true
+	}
+	for chk.NumRows() < e.maxChunkSize {
+		if e.Idx >= len(e.rowPtrs) {
+			break
+		}
+		rowPtr := e.rowPtrs[e.Idx]
+		chk.AppendRow(e.rowChunks.GetRow(rowPtr))
+		e.Idx++
+	}
+	return nil
+}
+
+func (e *SortExec) sreset() {
+	e.Idx = 0
+	e.fetched = false
+}
+
+func (e *SortExec) fetchWindow(ctx context.Context) error {
+	fields := e.retTypes()
+	e.rowChunks = chunk.NewList(fields, e.initCap, e.maxChunkSize)
+	e.rowChunks.GetMemTracker().AttachTo(e.memTracker)
+	e.rowChunks.GetMemTracker().SetLabel("rowChunks")
+	for {
+		if e.chk == nil {
+			e.chk = e.children[0].newFirstChunk()
+		}
+		err := e.children[0].Next(ctx, e.chk)
+		if err != nil {
+			return errors.Trace(err)
+		}
+		rowCount := e.chk.NumRows()
+		if rowCount == 0 {
+			e.sterminated = true
+			break
+		}
+		e.rowChunks.Add(e.chk)
+		if rowCount < e.maxChunkSize {
+			break
+		}
+	}
+	return nil
+}
+
 func (e *SortExec) fetchRowChunks(ctx context.Context) error {
 	fields := e.retTypes()
 	e.rowChunks = chunk.NewList(fields, e.initCap, e.maxChunkSize)
@@ -125,7 +212,6 @@ func (e *SortExec) fetchRowChunks(ctx context.Context) error {
 		if rowCount == 0 {
 			break
 		}
-		e.rowChunks.Add(chk)
 	}
 	return nil
 }
@@ -221,6 +307,9 @@ func (e *SortExec) keyChunksLess(i, j int) bool {
 	keyRowJ := e.keyChunks.GetRow(e.rowPtrs[j])
 	return e.lessRow(keyRowI, keyRowJ)
 }
+
+
+
 
 // TopNExec implements a Top-N algorithm and it is built from a SELECT statement with ORDER BY and LIMIT.
 // Instead of sorting all the rows fetched from the table, it keeps the Top-N elements only in a heap to reduce memory usage.

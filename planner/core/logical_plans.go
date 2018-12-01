@@ -581,6 +581,7 @@ type LogicalSort struct {
 	baseLogicalPlan
 
 	ByItems []*ByItems
+	StreamWindowSort bool
 }
 
 func (ls *LogicalSort) extractCorrelatedCols() []*expression.CorrelatedColumn {

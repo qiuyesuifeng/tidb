@@ -1254,6 +1254,7 @@ func (b *executorBuilder) buildSort(v *plannercore.PhysicalSort) Executor {
 		baseExecutor: newBaseExecutor(b.ctx, v.Schema(), v.ExplainID(), childExec),
 		ByItems:      v.ByItems,
 		schema:       v.Schema(),
+		streamWindowSort: v.StreamWinSort,
 	}
 	metrics.ExecutorCounter.WithLabelValues("SortExec").Inc()
 	return &sortExec

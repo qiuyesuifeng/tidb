@@ -742,7 +742,7 @@ func (b *PlanBuilder) buildUnion(union *ast.UnionStmt) (LogicalPlan, error) {
 	oldLen := unionPlan.Schema().Len()
 
 	if union.OrderBy != nil {
-		unionPlan, err = b.buildSort(unionPlan, union.OrderBy.Items, nil)
+		unionPlan, err = b.buildSort(unionPlan, union.OrderBy.Items, nil, false)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
@@ -830,7 +830,7 @@ func (by *ByItems) Clone() *ByItems {
 	return &ByItems{Expr: by.Expr.Clone(), Desc: by.Desc}
 }
 
-func (b *PlanBuilder) buildSort(p LogicalPlan, byItems []*ast.ByItem, aggMapper map[*ast.AggregateFuncExpr]int) (*LogicalSort, error) {
+func (b *PlanBuilder) buildSort(p LogicalPlan, byItems []*ast.ByItem, aggMapper map[*ast.AggregateFuncExpr]int, streamWinSort bool) (*LogicalSort, error) {
 	b.curClause = orderByClause
 	sort := LogicalSort{}.Init(b.ctx)
 	exprs := make([]*ByItems, 0, len(byItems))
@@ -845,6 +845,7 @@ func (b *PlanBuilder) buildSort(p LogicalPlan, byItems []*ast.ByItem, aggMapper 
 	}
 	sort.ByItems = exprs
 	sort.SetChildren(p)
+	sort.StreamWindowSort = streamWinSort
 	return sort, nil
 }
 
@@ -1761,7 +1762,7 @@ func (b *PlanBuilder) buildSelect(sel *ast.SelectStmt) (p LogicalPlan, err error
 	}
 
 	if sel.OrderBy != nil {
-		p, err = b.buildSort(p, sel.OrderBy.Items, orderMap)
+		p, err = b.buildSort(p, sel.OrderBy.Items, orderMap, sel.StreamWindowSpec != nil)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
@@ -2120,7 +2121,7 @@ func (b *PlanBuilder) buildUpdate(update *ast.UpdateStmt) (Plan, error) {
 		}
 	}
 	if sel.OrderBy != nil {
-		p, err = b.buildSort(p, sel.OrderBy.Items, nil)
+		p, err = b.buildSort(p, sel.OrderBy.Items, nil, false)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
@@ -2280,7 +2281,7 @@ func (b *PlanBuilder) buildDelete(delete *ast.DeleteStmt) (Plan, error) {
 	}
 
 	if sel.OrderBy != nil {
-		p, err = b.buildSort(p, sel.OrderBy.Items, nil)
+		p, err = b.buildSort(p, sel.OrderBy.Items, nil, false)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}

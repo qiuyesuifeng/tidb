@@ -31,7 +31,6 @@ import (
 	"github.com/pingcap/tidb/types"
 )
 
-// TODO: Complete here
 type AggWindowDesc struct {
 	WinColName string
 	Size uint64
