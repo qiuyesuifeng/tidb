@@ -20,6 +20,7 @@ import (
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/parser/model"
+	"github.com/pingcap/parser/mysql"
 	"github.com/pingcap/tidb/ddl/util"
 	"github.com/pingcap/tidb/infoschema"
 	"github.com/pingcap/tidb/kv"
@@ -49,6 +50,13 @@ func onCreateStream(d *ddlCtx, t *meta.Meta, job *model.Job) (ver int64, _ error
 	ver, err = updateSchemaVersion(t, job)
 	if err != nil {
 		return ver, errors.Trace(err)
+	}
+
+	// Fill in TableInfo.StreamWinCol
+	for _, c := range tbInfo.Columns {
+		if c.Tp == mysql.TypeTimestamp {
+			tbInfo.StreamWinCol = c.Name.L
+		}
 	}
 
 	switch tbInfo.State {

@@ -103,6 +103,8 @@ func (e *ShowExec) fetchAll() error {
 		return e.fetchShowColumns()
 	case ast.ShowCreateTable:
 		return e.fetchShowCreateTable()
+	case ast.ShowCreateStream:
+		return e.fetchShowCreateStream()
 	case ast.ShowCreateDatabase:
 		return e.fetchShowCreateDatabase()
 	case ast.ShowDatabases:
@@ -536,7 +538,9 @@ func (e *ShowExec) fetchShowCreateTable() error {
 	if err != nil {
 		return errors.Trace(err)
 	}
-
+	if tb.Meta().IsStream {
+		return errors.Trace(errors.New(fmt.Sprintf("table %s is a stream table. use 'show create stream %s' instead", tb.Meta().Name.L, tb.Meta().Name.L)))
+	}
 	sqlMode := e.ctx.GetSessionVars().SQLMode
 
 	// TODO: let the result more like MySQL.
@@ -717,6 +721,80 @@ func (e *ShowExec) fetchShowCreateTable() error {
 	if len(tb.Meta().Comment) > 0 {
 		buf.WriteString(fmt.Sprintf(" COMMENT='%s'", format.OutputFormat(tb.Meta().Comment)))
 	}
+
+	e.appendRow([]interface{}{tb.Meta().Name.O, buf.String()})
+	return nil
+}
+
+func (e *ShowExec) fetchShowCreateStream() error {
+	tb, err := e.getTable()
+	if err != nil {
+		return errors.Trace(err)
+	}
+	if !tb.Meta().IsStream {
+		return errors.Trace(errors.New(fmt.Sprintf("table %s is not a stream table. use 'show create talbe %s' instead", tb.Meta().Name.L, tb.Meta().Name.L)))
+	}
+
+	sqlMode := e.ctx.GetSessionVars().SQLMode
+
+	// TODO: let the result more like MySQL.
+	var buf bytes.Buffer
+	buf.WriteString(fmt.Sprintf("CREATE STREAM %s (\n", escape(tb.Meta().Name, sqlMode)))
+	for i, col := range tb.Cols() {
+		buf.WriteString(fmt.Sprintf("  %s %s", escape(col.Name, sqlMode), col.GetTypeDesc()))
+		if col.IsGenerated() {
+			// It's a generated column.
+			buf.WriteString(fmt.Sprintf(" GENERATED ALWAYS AS (%s)", col.GeneratedExprString))
+			if col.GeneratedStored {
+				buf.WriteString(" STORED")
+			} else {
+				buf.WriteString(" VIRTUAL")
+			}
+		}
+		if mysql.HasAutoIncrementFlag(col.Flag) {
+			buf.WriteString(" NOT NULL AUTO_INCREMENT")
+		} else {
+			if mysql.HasNotNullFlag(col.Flag) {
+				buf.WriteString(" NOT NULL")
+			}
+			if !mysql.HasNoDefaultValueFlag(col.Flag) {
+				defaultValue := col.GetDefaultValue()
+				switch defaultValue {
+				case nil:
+					if !mysql.HasNotNullFlag(col.Flag) {
+						if col.Tp == mysql.TypeTimestamp {
+							buf.WriteString(" NULL")
+						}
+						buf.WriteString(" DEFAULT NULL")
+					}
+				case "CURRENT_TIMESTAMP":
+					buf.WriteString(" DEFAULT CURRENT_TIMESTAMP")
+				default:
+					defaultValStr := fmt.Sprintf("%v", defaultValue)
+					if col.Tp == mysql.TypeBit {
+						defaultValBinaryLiteral := types.BinaryLiteral(defaultValStr)
+						buf.WriteString(fmt.Sprintf(" DEFAULT %s", defaultValBinaryLiteral.ToBitLiteralString(true)))
+					} else {
+						buf.WriteString(fmt.Sprintf(" DEFAULT '%s'", format.OutputFormat(defaultValStr)))
+					}
+				}
+			}
+			if mysql.HasOnUpdateNowFlag(col.Flag) {
+				buf.WriteString(" ON UPDATE CURRENT_TIMESTAMP")
+			}
+		}
+		if len(col.Comment) > 0 {
+			buf.WriteString(fmt.Sprintf(" COMMENT '%s'", format.OutputFormat(col.Comment)))
+		}
+		if i != len(tb.Cols())-1 {
+			buf.WriteString(",\n")
+		}
+	}
+	buf.WriteString(") WITH (\n")
+	for k, v := range tb.Meta().StreamProperties {
+		buf.WriteString(fmt.Sprintf("\t\t'%s'='%s'\n", k, v))
+	}
+	buf.WriteString("\t\t);")
 
 	e.appendRow([]interface{}{tb.Meta().Name.O, buf.String()})
 	return nil

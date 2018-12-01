@@ -70,6 +70,8 @@ type LogicalPlan interface {
 	// PruneColumns prunes the unused columns.
 	PruneColumns([]*expression.Column)
 
+	CompleteStreamWindow() []*expression.Column
+
 	// findBestTask converts the logical plan to the physical plan. It's a new interface.
 	// It is called recursively from the parent to the children to create the result physical plan.
 	// Some logical plans will convert the children to the physical plans in different ways, and return the one
@@ -231,6 +233,10 @@ func (p *baseLogicalPlan) PruneColumns(parentUsedCols []*expression.Column) {
 		return
 	}
 	p.children[0].PruneColumns(parentUsedCols)
+}
+
+func (p *baseLogicalPlan) CompleteStreamWindow() []*expression.Column {
+	return p.children[0].CompleteStreamWindow()
 }
 
 // basePlan implements base Plan interface.

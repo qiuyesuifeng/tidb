@@ -919,7 +919,7 @@ func (b *PlanBuilder) buildShow(show *ast.ShowStmt) (Plan, error) {
 			if p.DBName == "" {
 				return nil, ErrNoDB
 			}
-		case ast.ShowCreateTable:
+		case ast.ShowCreateTable, ast.ShowCreateStream:
 			b.visitInfo = appendVisitInfo(b.visitInfo, mysql.AllPrivMask, show.Table.Schema.L, show.Table.Name.L, "")
 		}
 		p.SetSchema(buildShowSchema(show))
@@ -1631,6 +1631,8 @@ func buildShowSchema(s *ast.ShowStmt) (schema *expression.Schema) {
 			mysql.TypeVarchar, mysql.TypeVarchar, mysql.TypeLonglong}
 	case ast.ShowCreateTable:
 		names = []string{"Table", "Create Table"}
+	case ast.ShowCreateStream:
+		names = []string{"Table", "Create Stream"}
 	case ast.ShowCreateDatabase:
 		names = []string{"Database", "Create Database"}
 	case ast.ShowGrants:

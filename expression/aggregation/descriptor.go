@@ -33,6 +33,7 @@ import (
 
 // TODO: Complete here
 type AggWindowDesc struct {
+	WinColName string
 	Size uint64
 }
 
