@@ -12,11 +12,11 @@ TiDB (The pronunciation is: /'taɪdiːbi:/ tai-D-B, etymology: titanium) is an o
 
 **When TiDB meets steaming, what will happen?**
 
-TSBSQL is short for TiDB Streaming and Batch SQL which aims to make TiDB not only works as a relational database management system (RDBMS) but also as a streaming system.
+TBSSQL is short for TiDB Batch and Streaming SQL which aims to make TiDB not only works as a relational database management system (RDBMS) but also as a streaming system.
 
 Maybe unify Batch and Streaming SQL in future:)
 
-## TSBSQL Features
+## TBSSQL Features
 - [x] Create Stream Table
 - [x] Drop Stream Table
 - [x] Show Streams
@@ -34,7 +34,7 @@ Maybe unify Batch and Streaming SQL in future:)
 
 ## Quick start
 
-It is much easiser, just like build TiDB.
+It is much easier, just like build TiDB.
 
 In TiDB Repo, run `make server`, and then `./bin/tidb-server`
 
