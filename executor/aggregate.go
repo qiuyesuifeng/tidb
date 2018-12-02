@@ -946,20 +946,20 @@ type StreamWindowHashAggExec struct {
 	groupKeyBuffer   []byte
 	groupValDatums   []types.Datum
 
-	defaultVal       *chunk.Chunk
+	defaultVal *chunk.Chunk
 
 	childResult *chunk.Chunk
 
-	lastIter  *chunk.Iterator4Chunk
+	lastIter *chunk.Iterator4Chunk
 
 	winCol    string
 	winColIdx int
-	winSize uint64
+	winSize   uint64
 
-	windowStart types.Time
-	windowEnd types.Time
+	windowStart   types.Time
+	windowEnd     types.Time
 	needSetWindow bool
-	init   bool
+	init          bool
 }
 
 // Open implements the Executor Open interface.
@@ -1032,10 +1032,8 @@ func (e *StreamWindowHashAggExec) Close() error {
 
 func (e *StreamWindowHashAggExec) next(ctx context.Context, chk *chunk.Chunk) error {
 	// In this stage we consider all data from src as a single group.
-	//fmt.Println("XXXXXXXXXXXXXXXXX")
 	if !e.prepared {
 		err := e.execute(ctx)
-		//fmt.Println("55555")
 		if err != nil {
 			return errors.Trace(err)
 		}
@@ -1050,7 +1048,6 @@ func (e *StreamWindowHashAggExec) next(ctx context.Context, chk *chunk.Chunk) er
 		e.prepared = true
 	}
 	chk.Reset()
-	//fmt.Println("666666")
 
 	// Since we return e.maxChunkSize rows every time, so we should not traverse
 	// `groupSet` because of its randomness.
@@ -1064,8 +1061,8 @@ func (e *StreamWindowHashAggExec) next(ctx context.Context, chk *chunk.Chunk) er
 		for i, af := range e.PartialAggFuncs {
 			af.AppendFinalResult2Chunk(e.ctx, partialResults[i], chk)
 		}
-		chk.AppendTime(len(e.schema.Columns) - 2, e.windowStart)
-		chk.AppendTime(len(e.schema.Columns) - 1, e.windowEnd)
+		chk.AppendTime(len(e.schema.Columns)-2, e.windowStart)
+		chk.AppendTime(len(e.schema.Columns)-1, e.windowEnd)
 		if chk.NumRows() == e.maxChunkSize { //|| e.s {
 			e.cursor4GroupKey++
 			return nil
@@ -1076,11 +1073,9 @@ func (e *StreamWindowHashAggExec) next(ctx context.Context, chk *chunk.Chunk) er
 
 // execute fetches Chunks from src and update each aggregate function for each row in Chunk.
 func (e *StreamWindowHashAggExec) execute(ctx context.Context) (err error) {
-	//fmt.Println("=== StreamWindowHashAggExec.execute === ")
 	var inputIter *chunk.Iterator4Chunk
 	var row chunk.Row
 	for {
-		//fmt.Println("e.lastIter == nil = %+v", e.lastIter == nil)
 		if e.lastIter == nil {
 			inputIter = chunk.NewIterator4Chunk(e.childResult)
 			err := e.children[0].Next(ctx, e.childResult)
@@ -1095,24 +1090,19 @@ func (e *StreamWindowHashAggExec) execute(ctx context.Context) (err error) {
 			inputIter = e.lastIter
 			row = inputIter.Current()
 		}
-		for ;row != inputIter.End(); row = inputIter.Next() {
-			//fmt.Println("999999999")
+		for ; row != inputIter.End(); row = inputIter.Next() {
 			tm := row.GetTime(e.winColIdx)
 			if e.needSetWindow {
 				e.windowStart = tm
-				e.windowEnd, err = e.windowStart.Add(e.ctx.GetSessionVars().StmtCtx, types.Duration{Duration:  time.Duration(int(e.winSize)) * time.Second})
+				e.windowEnd, err = e.windowStart.Add(e.ctx.GetSessionVars().StmtCtx, types.Duration{Duration: time.Duration(int(e.winSize)) * time.Second})
 				e.needSetWindow = false
 			}
-			//fmt.Printf("win_start=%s, win_end=%s\n",e.windowStart.String(), e.windowEnd.String())
-			//fmt.Printf("tm=%s\n",tm)
-			//fmt.Printf("FFFFFF\n")
+
 			if tm.Compare(e.windowEnd) == 1 {
 				e.needSetWindow = true
 			}
-			//fmt.Printf("e.needSetWindow=%v\n", e.needSetWindow)
-			//fmt.Printf("e.shouldStop() =%v\n", e.shouldStop())
-			//fmt.Printf("row != inputIter.End() =%v\n", row == inputIter.End())
-			if e.needSetWindow || e.shouldStop(){
+
+			if e.needSetWindow || e.shouldStop() {
 				if row == inputIter.End() {
 					e.lastIter = nil
 				} else {
@@ -1121,18 +1111,14 @@ func (e *StreamWindowHashAggExec) execute(ctx context.Context) (err error) {
 				return nil
 			}
 			groupKey, err := e.getGroupKey(row)
-			//fmt.Println("111")
 			if err != nil {
 				return errors.Trace(err)
 			}
-			//fmt.Println("222")
 			if !e.groupSet.Exist(groupKey) {
 				e.groupSet.Insert(groupKey)
 				e.groupKeys = append(e.groupKeys, groupKey)
 			}
-			//fmt.Println("333")
 			partialResults := e.getPartialResults(groupKey)
-			//fmt.Println("444")
 			for i, af := range e.PartialAggFuncs {
 				err = af.UpdatePartialResult(e.ctx, []chunk.Row{row}, partialResults[i])
 				if err != nil {

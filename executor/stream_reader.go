@@ -24,6 +24,7 @@ import (
 	"github.com/pingcap/tidb/sessionctx/variable"
 	"github.com/pingcap/tidb/types"
 	"github.com/pingcap/tidb/types/json"
+	"github.com/pingcap/tidb/util"
 	"github.com/pingcap/tidb/util/chunk"
 	"github.com/pingcap/tidb/util/mock"
 	// log "github.com/sirupsen/logrus"
@@ -36,6 +37,22 @@ var _ Executor = &StreamReaderExecutor{}
 var batchFetchCnt = 10
 var maxFetchCnt = 10000
 
+type ErrorResponse struct {
+	ErrorCode int64  `json:"error_code"`
+	ErrorMsg  string `json:"error_msg"`
+}
+
+type KafkaStreamData struct {
+	Data   string `json:"data"`
+	Offset int64  `json:"offset"`
+}
+
+type KafkaStreamResponse struct {
+	ErrorResponse
+
+	Msgs []KafkaStreamData `json:"msgs"`
+}
+
 // StreamReaderExecutor reads data from a stream.
 type StreamReaderExecutor struct {
 	baseExecutor
@@ -46,6 +63,8 @@ type StreamReaderExecutor struct {
 	cursor int
 	pos    int
 
+	tp           string
+	topic        string
 	variableName string
 }
 
@@ -68,7 +87,13 @@ func (e *StreamReaderExecutor) Open(ctx context.Context) error {
 		return errors.New("Cannot find stream table type")
 	}
 
+	e.tp = tp
 	e.setVariableName(strings.ToLower(tp))
+
+	e.topic, ok = e.Table.StreamProperties["topic"]
+	if !ok {
+		return errors.New("Cannot find stream table topic")
+	}
 
 	var err error
 	value, err := e.ctx.GetSessionVars().GlobalVarsAccessor.GetGlobalSysVar(e.variableName)
@@ -101,10 +126,11 @@ func (e *StreamReaderExecutor) Next(ctx context.Context, chk *chunk.Chunk) error
 		return errors.Trace(err)
 	}
 
+	pos := 0
 	chk.GrowAndReset(e.maxChunkSize)
 	if e.result == nil {
 		e.result = e.newFirstChunk()
-		err = e.fetchAll(e.pos)
+		pos, err = e.fetchAll(e.pos)
 		if err != nil {
 			return errors.Trace(err)
 		}
@@ -128,7 +154,7 @@ func (e *StreamReaderExecutor) Next(ctx context.Context, chk *chunk.Chunk) error
 	chk.Append(e.result, e.cursor, e.cursor+numCurBatch)
 	e.cursor += numCurBatch
 
-	e.pos += numCurBatch
+	e.pos = pos
 	err = e.ctx.GetSessionVars().GlobalVarsAccessor.SetGlobalSysVar(e.variableName, strconv.Itoa(e.pos))
 	if err != nil {
 		return errors.Trace(err)
@@ -142,58 +168,99 @@ func (e *StreamReaderExecutor) Close() error {
 	return nil
 }
 
-func (e *StreamReaderExecutor) fetchAll(cursor int) error {
+func (e *StreamReaderExecutor) fetchAll(cursor int) (int, error) {
+	var pos int
+	var err error
 	tableName := e.Table.Name.L
 	if tableName == "tidb_kafka_stream_table_demo" {
-		err := e.fetchMockKafkaData(cursor)
+		pos, err = e.fetchMockKafkaData(cursor)
 		if err != nil {
-			return errors.Trace(err)
+			return 0, errors.Trace(err)
 		}
 	} else if tableName == "tidb_pulsar_stream_table_demo" {
-		err := e.fetchMockPulsarData(cursor)
+		pos, err = e.fetchMockPulsarData(cursor)
 		if err != nil {
-			return errors.Trace(err)
+			return 0, errors.Trace(err)
 		}
 	} else if tableName == "tidb_stream_table_demo" {
-		err := e.fetchMockData(cursor)
+		pos, err = e.fetchMockData(cursor)
 		if err != nil {
-			return errors.Trace(err)
+			return 0, errors.Trace(err)
+		}
+	} else {
+		pos, err = e.fetchKafkaData(e.pos)
+		if err != nil {
+			return 0, errors.Trace(err)
 		}
 	}
 
-	return nil
+	return pos, nil
 }
 
-func (e *StreamReaderExecutor) fetchMockData(cursor int) error {
+func (e *StreamReaderExecutor) fetchMockData(cursor int) (int, error) {
+	var pos int
 	for i := cursor; i < maxFetchCnt && i < cursor+batchFetchCnt; i++ {
 		data, err := e.getData(mock.MockStreamJsonData[i])
 		if err != nil {
-			return errors.Trace(err)
+			return 0, errors.Trace(err)
 		}
 
 		row := chunk.MutRowFromDatums(data).ToRow()
 		e.result.AppendRow(row)
+		pos = i
 	}
 
-	return nil
+	return pos, nil
 }
 
-func (e *StreamReaderExecutor) fetchMockKafkaData(cursor int) error {
+func (e *StreamReaderExecutor) fetchKafkaData(cursor int) (int, error) {
+	url := "http://127.0.0.1:9001/api/v1/data/kafka"
+	rq := util.Get(url).Param("topic", e.topic).
+		Param("batch", "10").
+		Param("offset", strconv.Itoa(cursor))
+
+	resp := &KafkaStreamResponse{}
+	err := rq.ToJson(resp)
+	if err != nil {
+		return 0, errors.Trace(err)
+	}
+
+	// log.Infof("[fetch kafka data]%v", resp)
+
+	var pos int
+	for _, msg := range resp.Msgs {
+		row, err := e.getData(msg.Data)
+		if err != nil {
+			return 0, errors.Trace(err)
+		}
+
+		e.result.AppendRow(chunk.MutRowFromDatums(row).ToRow())
+		pos = int(msg.Offset)
+	}
+
+	return pos, nil
+}
+
+func (e *StreamReaderExecutor) fetchMockKafkaData(cursor int) (int, error) {
+	var pos int
 	for i := cursor; i < maxFetchCnt && i < cursor+batchFetchCnt; i++ {
 		row := []interface{}{mock.MockKafkaStreamData[i].ID, mock.MockKafkaStreamData[i].Content, mock.MockKafkaStreamData[i].CreateTime}
 		e.appendRow(e.result, row)
+		pos = i
 	}
 
-	return nil
+	return pos, nil
 }
 
-func (e *StreamReaderExecutor) fetchMockPulsarData(cursor int) error {
+func (e *StreamReaderExecutor) fetchMockPulsarData(cursor int) (int, error) {
+	var pos int
 	for i := cursor; i < maxFetchCnt && i < cursor+batchFetchCnt; i++ {
 		row := []interface{}{mock.MockPulsarStreamData[i].ID, mock.MockPulsarStreamData[i].Content, mock.MockPulsarStreamData[i].CreateTime}
 		e.appendRow(e.result, row)
+		pos = i
 	}
 
-	return nil
+	return pos, nil
 }
 
 func (e *StreamReaderExecutor) getData(data string) ([]types.Datum, error) {
