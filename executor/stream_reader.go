@@ -199,7 +199,7 @@ func (e *StreamReaderExecutor) fetchAll(cursor int) (int, error) {
 
 func (e *StreamReaderExecutor) fetchMockData(cursor int) (int, error) {
 	var pos int
-	for i := cursor; i < maxFetchCnt && i < cursor+batchFetchCnt; i++ {
+	for i := cursor; i < maxFetchCnt && i < cursor+batchFetchCnt; {
 		data, err := e.getData(mock.MockStreamJsonData[i])
 		if err != nil {
 			return 0, errors.Trace(err)
@@ -207,6 +207,8 @@ func (e *StreamReaderExecutor) fetchMockData(cursor int) (int, error) {
 
 		row := chunk.MutRowFromDatums(data).ToRow()
 		e.result.AppendRow(row)
+
+		i++
 		pos = i
 	}
 
