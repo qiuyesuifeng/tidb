@@ -125,7 +125,12 @@ func (b *PlanBuilder) buildAggregation(p LogicalPlan, aggFuncList []*ast.Aggrega
 	}
 	//TODO: Complete here
 	if sw != nil {
-		plan4Agg.AggWindow = &aggregation.AggWindowDesc{Size: sw.Size, WinColName: sw.WinCol}
+		if len(sw.WinCol) != 0 {
+			plan4Agg.AggWindow = &aggregation.AggWindowDesc{Size: sw.Size, WinColName: sw.WinCol}
+		} else {
+			plan4Agg.AggWindow = &aggregation.AggWindowDesc{Size: sw.Size, WinColName: b.streamColName}
+		}
+		//plan4Agg.AggWindow = &aggregation.AggWindowDesc{Size: sw.Size, WinColName: sw.WinCol}
 	//	winStartCol := &expression.Column{
 	//		ColName:  model.NewCIStr("window_start"),
 	//		UniqueID: plan4Agg.ctx.GetSessionVars().AllocPlanColumnID(),
@@ -673,6 +678,9 @@ func unionJoinFieldType(a, b *types.FieldType) *types.FieldType {
 	resultTp.Decimal = mathutil.Max(a.Decimal, b.Decimal)
 	// `Flen - Decimal` is the fraction before '.'
 	resultTp.Flen = mathutil.Max(a.Flen-a.Decimal, b.Flen-b.Decimal) + resultTp.Decimal
+	if resultTp.EvalType() != types.ETInt && (a.EvalType() == types.ETInt || b.EvalType() == types.ETInt) && resultTp.Flen < mysql.MaxIntWidth {
+		resultTp.Flen = mysql.MaxIntWidth
+	}
 	resultTp.Charset = a.Charset
 	resultTp.Collate = a.Collate
 	expression.SetBinFlagOrBinStr(b, resultTp)
@@ -691,7 +699,6 @@ func (b *PlanBuilder) buildProjection4Union(u *LogicalUnionAll) {
 		}
 		unionCols = append(unionCols, &expression.Column{
 			ColName:  col.ColName,
-			TblName:  col.TblName,
 			RetType:  resultTp,
 			UniqueID: b.ctx.GetSessionVars().AllocPlanColumnID(),
 		})
@@ -831,7 +838,11 @@ func (by *ByItems) Clone() *ByItems {
 }
 
 func (b *PlanBuilder) buildSort(p LogicalPlan, byItems []*ast.ByItem, aggMapper map[*ast.AggregateFuncExpr]int, streamWinSort bool) (*LogicalSort, error) {
-	b.curClause = orderByClause
+	if _, isUnion := p.(*LogicalUnionAll); isUnion {
+		b.curClause = globalOrderByClause
+	} else {
+		b.curClause = orderByClause
+	}
 	sort := LogicalSort{}.Init(b.ctx)
 	exprs := make([]*ByItems, 0, len(byItems))
 	for _, item := range byItems {
@@ -1852,6 +1863,14 @@ func (b *PlanBuilder) buildDataSource(tn *ast.TableName) (LogicalPlan, error) {
 	}
 
 	tableInfo := tbl.Meta()
+	//TODO: Fix This
+	if tableInfo.IsStream {
+		for _, c := range tableInfo.Columns {
+			if c.Tp == mysql.TypeTimestamp {
+				b.streamColName = c.Name.L
+			}
+		}
+	}
 	b.visitInfo = appendVisitInfo(b.visitInfo, mysql.SelectPriv, dbName.L, tableInfo.Name.L, "")
 
 	if tableInfo.GetPartitionInfo() != nil {
@@ -2111,7 +2130,7 @@ func (b *PlanBuilder) buildUpdate(update *ast.UpdateStmt) (Plan, error) {
 		if dbName == "" {
 			dbName = b.ctx.GetSessionVars().CurrentDB
 		}
-		b.visitInfo = appendVisitInfo(b.visitInfo, mysql.UpdatePriv, dbName, t.Name.L, "")
+		b.visitInfo = appendVisitInfo(b.visitInfo, mysql.SelectPriv, dbName, t.Name.L, "")
 	}
 
 	if sel.Where != nil {
@@ -2222,6 +2241,10 @@ func (b *PlanBuilder) buildUpdateLists(tableList []*ast.TableName, list []*ast.A
 		newExpr = expression.BuildCastFunction(b.ctx, newExpr, col.GetType())
 		p = np
 		newList = append(newList, &expression.Assignment{Col: col, Expr: newExpr})
+	}
+	for _, assign := range newList {
+		col := assign.Col
+		b.visitInfo = appendVisitInfo(b.visitInfo, mysql.UpdatePriv, col.DBName.L, col.TblName.L, "")
 	}
 	return newList, p, nil
 }

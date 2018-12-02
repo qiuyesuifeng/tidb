@@ -16,6 +16,9 @@ package executor
 import (
 	"bytes"
 	"fmt"
+	"github.com/pingcap/tidb/meta"
+	"github.com/pingcap/tidb/meta/autoid"
+	"github.com/pingcap/tidb/table/tables"
 	"math"
 	"sort"
 	"strings"
@@ -573,6 +576,7 @@ func (b *executorBuilder) buildInsert(v *plannercore.Insert) Executor {
 	if v.IsReplace {
 		return b.buildReplace(ivs)
 	}
+
 	insert := &InsertExec{
 		InsertValues: ivs,
 		OnDuplicate:  append(v.OnDuplicate, v.GenCols.OnDuplicates...),
@@ -658,12 +662,84 @@ func (b *executorBuilder) buildRevoke(revoke *ast.RevokeStmt) Executor {
 }
 
 func (b *executorBuilder) buildDDL(v *plannercore.DDL) Executor {
-	e := &DDLExec{
+	if b.ctx.GetSessionVars().CreateTableInsertingID != 0 {
+		// in a 'inserting data from select' state of creating table.
+		return b.buildCreateTableInsert(v, b.ctx.GetSessionVars().CreateTableInsertingID)
+	}
+	return &DDLExec{
 		baseExecutor: newBaseExecutor(b.ctx, v.Schema(), v.ExplainID()),
 		stmt:         v.Statement,
 		is:           b.is,
 	}
-	return e
+}
+
+// buildCreateTableInsert builds a CreateTableInsertExec to insert data when creating table by 'create table ... select'
+func (b *executorBuilder) buildCreateTableInsert(v *plannercore.DDL, tableID int64) Executor {
+	stmt, ok := v.Statement.(*ast.CreateTableStmt)
+	if !ok || v.InsertPlan.SelectPlan == nil {
+		b.err = errors.Errorf("Unexpected plan: %s", v.Statement.Text())
+		return nil
+	}
+	selectExec := b.build(v.InsertPlan.SelectPlan)
+
+	dom := domain.GetDomain(b.ctx)
+	ver, err := dom.Store().CurrentVersion()
+	if err != nil {
+		b.err = errors.Trace(err)
+		return nil
+	}
+	snapshot, err := dom.Store().GetSnapshot(ver)
+	if err != nil {
+		b.err = errors.Trace(err)
+		return nil
+	}
+
+	m := meta.NewSnapshotMeta(snapshot)
+	dbInfo, ok := dom.InfoSchema().SchemaByName(stmt.Table.Schema)
+	if !ok {
+		b.err = errors.Trace(err)
+		return nil
+	}
+	tbInfo, err := m.GetTable(dbInfo.ID, tableID)
+	if err != nil {
+		b.err = errors.Trace(err)
+		return nil
+	}
+
+	// We have to create an allocator here, which is not the one created by InfoSchema, but it should be fine.
+	alloc := autoid.NewAllocator(dom.Store(), tbInfo.GetDBID(dbInfo.ID))
+	tbl, err := tables.TableFromMeta(alloc, tbInfo)
+	if err != nil {
+		b.err = errors.Trace(err)
+		return nil
+	}
+	// The operation of the minus 1 to make sure that the current value doesn't be used,
+	// the next Alloc operation will get this value.
+	// Its behavior is consistent with MySQL.
+	if err = tbl.RebaseAutoID(nil, tbInfo.AutoIncID-1, false); err != nil {
+		b.err = errors.Trace(err)
+		return nil
+	}
+
+	insertVal := &InsertValues{
+		baseExecutor: newBaseExecutor(b.ctx, nil, v.ExplainID(), selectExec),
+		Table:        tbl,
+		Columns:      v.InsertPlan.Columns,
+		GenColumns:   v.InsertPlan.GenCols.Columns,
+		GenExprs:     v.InsertPlan.GenCols.Exprs,
+		SelectExec:   selectExec,
+	}
+	err = insertVal.initInsertColumns()
+	if err != nil {
+		b.err = err
+		return nil
+	}
+
+	return &CreateTableInsertExec{
+		InsertValues: insertVal,
+		onDuplicate:  stmt.OnDuplicate,
+		finished:     false,
+	}
 }
 
 // buildTrace builds a TraceExec for future executing. This method will be called
@@ -673,6 +749,7 @@ func (b *executorBuilder) buildTrace(v *plannercore.Trace) Executor {
 		baseExecutor: newBaseExecutor(b.ctx, v.Schema(), v.ExplainID()),
 		stmtNode:     v.StmtNode,
 		builder:      b,
+		format:       v.Format,
 	}
 }
 
@@ -1375,7 +1452,7 @@ func (b *executorBuilder) buildUpdate(v *plannercore.Update) Executor {
 
 // cols2Handle represents an mapper from column index to handle index.
 type cols2Handle struct {
-	// start/end represent the ordinal range [start, end) of the consecutive columns.
+	// start / end represent the ordinal range [start, end) of the consecutive columns.
 	start, end int32
 	// handleOrdinal represents the ordinal of the handle column.
 	handleOrdinal int32
@@ -1713,7 +1790,10 @@ func buildNoRangeTableReader(b *executorBuilder, v *plannercore.PhysicalTableRea
 	} else {
 		e.feedback = statistics.NewQueryFeedback(e.physicalTableID, ts.Hist, int64(ts.StatsCount()), ts.Desc)
 	}
-	collect := e.feedback.CollectFeedback(len(ts.Ranges))
+	collect := (b.ctx.GetSessionVars().StmtCtx.RuntimeStatsColl != nil) || e.feedback.CollectFeedback(len(ts.Ranges))
+	if !collect {
+		e.feedback.Invalidate()
+	}
 	e.dagPB.CollectRangeCounts = &collect
 
 	for i := range v.Schema().Columns {
@@ -1778,7 +1858,10 @@ func buildNoRangeIndexReader(b *executorBuilder, v *plannercore.PhysicalIndexRea
 	} else {
 		e.feedback = statistics.NewQueryFeedback(e.physicalTableID, is.Hist, int64(is.StatsCount()), is.Desc)
 	}
-	collect := e.feedback.CollectFeedback(len(is.Ranges))
+	collect := (b.ctx.GetSessionVars().StmtCtx.RuntimeStatsColl != nil) || e.feedback.CollectFeedback(len(is.Ranges))
+	if !collect {
+		e.feedback.Invalidate()
+	}
 	e.dagPB.CollectRangeCounts = &collect
 
 	for _, col := range v.OutputColumns {
@@ -1854,7 +1937,10 @@ func buildNoRangeIndexLookUpReader(b *executorBuilder, v *plannercore.PhysicalIn
 	// do not collect the feedback for table request.
 	collectTable := false
 	e.tableRequest.CollectRangeCounts = &collectTable
-	collectIndex := e.feedback.CollectFeedback(len(is.Ranges))
+	collectIndex := (b.ctx.GetSessionVars().StmtCtx.RuntimeStatsColl != nil) || e.feedback.CollectFeedback(len(is.Ranges))
+	if !collectIndex {
+		e.feedback.Invalidate()
+	}
 	e.dagPB.CollectRangeCounts = &collectIndex
 	if cols, ok := v.Schema().TblID2Handle[is.Table.ID]; ok {
 		e.handleIdx = cols[0].Index

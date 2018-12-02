@@ -315,8 +315,7 @@ type Show struct {
 
 	Conditions []expression.Expression
 
-	// Used by show variables
-	GlobalScope bool
+	GlobalScope bool // Used by `show variables`
 }
 
 // Set represents a plan for set stmt.
@@ -433,6 +432,9 @@ type DDL struct {
 	baseSchemaProducer
 
 	Statement ast.DDLNode
+
+	// InsertPlan is for 'create table ... select' syntax
+	InsertPlan Insert
 }
 
 // Explain represents a explain plan.
@@ -521,10 +523,10 @@ func (e *Explain) prepareOperatorInfo(p PhysicalPlan, taskType string, indent st
 	row := []string{e.prettyIdentifier(p.ExplainID(), indent, isLastChild), count, taskType, operatorInfo}
 	if e.Analyze {
 		runtimeStatsColl := e.ctx.GetSessionVars().StmtCtx.RuntimeStatsColl
-		if taskType == "cop" {
-			row = append(row, "") //TODO: wait collect resp from tikv
-		} else {
+		if runtimeStatsColl.Exists(p.ExplainID()) {
 			row = append(row, runtimeStatsColl.Get(p.ExplainID()).String())
+		} else {
+			row = append(row, "") //TODO: wait collect more executor info from tikv
 		}
 	}
 	e.Rows = append(e.Rows, row)

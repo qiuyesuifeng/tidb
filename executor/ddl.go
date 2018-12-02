@@ -40,6 +40,9 @@ type DDLExec struct {
 	stmt ast.StmtNode
 	is   infoschema.InfoSchema
 	done bool
+
+	// originalStartTS is used to specify the 'select' query timestamp of 'create table ... select'
+	originalStartTS uint64
 }
 
 // toErr converts the error to the ErrInfoSchemaChanged when the schema is outdated.
@@ -59,6 +62,12 @@ func (e *DDLExec) toErr(err error) error {
 		return errors.Trace(schemaInfoErr)
 	}
 	return errors.Trace(err)
+}
+
+// Open implements the Executor Open interface.
+func (e *DDLExec) Open(context.Context) error {
+	e.originalStartTS = e.ctx.Txn(true).StartTS()
+	return nil
 }
 
 // Next implements the Executor Next interface.
@@ -153,7 +162,7 @@ func (e *DDLExec) executeCreateDatabase(s *ast.CreateDatabaseStmt) error {
 }
 
 func (e *DDLExec) executeCreateTable(s *ast.CreateTableStmt) error {
-	err := domain.GetDomain(e.ctx).DDL().CreateTable(e.ctx, s)
+	err := domain.GetDomain(e.ctx).DDL().CreateTable(e.ctx, s, e.originalStartTS)
 	return errors.Trace(err)
 }
 

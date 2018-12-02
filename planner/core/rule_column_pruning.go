@@ -14,6 +14,7 @@
 package core
 
 import (
+	"fmt"
 
 	"github.com/pingcap/parser/ast"
 	"github.com/pingcap/parser/model"
@@ -21,7 +22,7 @@ import (
 	"github.com/pingcap/tidb/expression"
 	"github.com/pingcap/tidb/infoschema"
 	//"github.com/pingcap/tidb/types"
-	log "github.com/sirupsen/logrus"
+	//log "github.com/sirupsen/logrus"
 )
 
 type columnPruner struct {
@@ -37,7 +38,7 @@ func getUsedList(usedCols []*expression.Column, schema *expression.Schema) []boo
 	for _, col := range usedCols {
 		idx := schema.ColumnIndex(col)
 		if idx == -1 {
-			log.Errorf("Can't find column %s from schema %s.", col, schema)
+			panic(fmt.Sprintf("Can't find column %s from schema %s.", col, schema))
 		}
 		used[idx] = true
 	}

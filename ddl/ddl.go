@@ -199,8 +199,11 @@ var (
 type DDL interface {
 	CreateSchema(ctx sessionctx.Context, name model.CIStr, charsetInfo *ast.CharsetOpt) error
 	DropSchema(ctx sessionctx.Context, schema model.CIStr) error
-	CreateTable(ctx sessionctx.Context, stmt *ast.CreateTableStmt) error
 	CreateStream(ctx sessionctx.Context, stmt *ast.CreateStreamStmt) error
+	// CreateTable handles 'create table' ddl.
+	// 'snapshotTS' is used to specify the 'select' query timestamp of 'create table ... select',
+	// if there is no 'select' part, 'snapshotTS' is meaningless
+	CreateTable(ctx sessionctx.Context, stmt *ast.CreateTableStmt, snapshotTS uint64) (err error)
 	CreateTableWithLike(ctx sessionctx.Context, ident, referIdent ast.Ident, ifNotExists bool) error
 	DropTable(ctx sessionctx.Context, tableIdent ast.Ident) (err error)
 	DropStream(ctx sessionctx.Context, tableIdent ast.Ident) (err error)
@@ -317,7 +320,7 @@ func newDDL(ctx context.Context, etcdCli *clientv3.Client, store kv.Storage,
 	var syncer SchemaSyncer
 	if etcdCli == nil {
 		// The etcdCli is nil if the store is localstore which is only used for testing.
-		// So we use mockOwnerManager and mockSchemaSyncer.
+		// So we use mockOwnerManager and MockSchemaSyncer.
 		manager = owner.NewMockManager(id, cancelFunc)
 		syncer = NewMockSchemaSyncer()
 	} else {
@@ -433,6 +436,12 @@ func (d *ddl) genGlobalID() (int64, error) {
 	var globalID int64
 	err := kv.RunInNewTxn(d.store, true, func(txn kv.Transaction) error {
 		var err error
+
+		// gofail: var mockGenGlobalIDFail bool
+		// if mockGenGlobalIDFail {
+		//	 return errors.New("gofail genGlobalID error")
+		// }
+
 		globalID, err = meta.NewMeta(txn).GenGlobalID()
 		return errors.Trace(err)
 	})
@@ -523,6 +532,7 @@ func (d *ddl) doDDLJob(ctx sessionctx.Context, job *model.Job) error {
 		// If a job is a history job, the state must be JobSynced or JobCancel.
 		if historyJob.IsSynced() {
 			log.Infof("[ddl] DDL job ID:%d is finished", jobID)
+			ctx.GetSessionVars().StmtCtx.AddAffectedRows(uint64(historyJob.GetRowCount()))
 			return nil
 		}
 

@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/cznic/mathutil"
+	"github.com/opentracing/opentracing-go"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/parser/ast"
 	"github.com/pingcap/parser/model"
@@ -664,6 +665,10 @@ type LimitExec struct {
 
 // Next implements the Executor Next interface.
 func (e *LimitExec) Next(ctx context.Context, chk *chunk.Chunk) error {
+	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
+		span1 := span.Tracer().StartSpan("executor.Next", opentracing.ChildOf(span.Context()))
+		defer span1.Finish()
+	}
 	if e.runtimeStats != nil {
 		start := time.Now()
 		defer func() { e.runtimeStats.Record(time.Now().Sub(start), chk.NumRows()) }()
@@ -764,6 +769,7 @@ func init() {
 			chk = chunk.Renew(chk, sctx.GetSessionVars().MaxChunkSize)
 		}
 	}
+
 }
 
 // TableDualExec represents a dual table executor.
@@ -783,6 +789,10 @@ func (e *TableDualExec) Open(ctx context.Context) error {
 
 // Next implements the Executor Next interface.
 func (e *TableDualExec) Next(ctx context.Context, chk *chunk.Chunk) error {
+	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
+		span1 := span.Tracer().StartSpan("tableDual.Next", opentracing.ChildOf(span.Context()))
+		defer span1.Finish()
+	}
 	if e.runtimeStats != nil {
 		start := time.Now()
 		defer func() { e.runtimeStats.Record(time.Now().Sub(start), chk.NumRows()) }()
@@ -838,6 +848,10 @@ func (e *SelectionExec) Close() error {
 
 // Next implements the Executor Next interface.
 func (e *SelectionExec) Next(ctx context.Context, chk *chunk.Chunk) error {
+	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
+		span1 := span.Tracer().StartSpan("selection.Next", opentracing.ChildOf(span.Context()))
+		defer span1.Finish()
+	}
 	if e.runtimeStats != nil {
 		start := time.Now()
 		defer func() { e.runtimeStats.Record(time.Now().Sub(start), chk.NumRows()) }()
@@ -917,6 +931,10 @@ type TableScanExec struct {
 
 // Next implements the Executor Next interface.
 func (e *TableScanExec) Next(ctx context.Context, chk *chunk.Chunk) error {
+	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
+		span1 := span.Tracer().StartSpan("tableScan.Next", opentracing.ChildOf(span.Context()))
+		defer span1.Finish()
+	}
 	if e.runtimeStats != nil {
 		start := time.Now()
 		defer func() { e.runtimeStats.Record(time.Now().Sub(start), chk.NumRows()) }()
@@ -1021,6 +1039,10 @@ func (e *MaxOneRowExec) Open(ctx context.Context) error {
 
 // Next implements the Executor Next interface.
 func (e *MaxOneRowExec) Next(ctx context.Context, chk *chunk.Chunk) error {
+	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
+		span1 := span.Tracer().StartSpan("maxOneRow.Next", opentracing.ChildOf(span.Context()))
+		defer span1.Finish()
+	}
 	if e.runtimeStats != nil {
 		start := time.Now()
 		defer func() { e.runtimeStats.Record(time.Now().Sub(start), chk.NumRows()) }()
@@ -1167,6 +1189,10 @@ func (e *UnionExec) resultPuller(ctx context.Context, childID int) {
 
 // Next implements the Executor Next interface.
 func (e *UnionExec) Next(ctx context.Context, chk *chunk.Chunk) error {
+	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
+		span1 := span.Tracer().StartSpan("union.Next", opentracing.ChildOf(span.Context()))
+		defer span1.Finish()
+	}
 	if e.runtimeStats != nil {
 		start := time.Now()
 		defer func() { e.runtimeStats.Record(time.Now().Sub(start), chk.NumRows()) }()
@@ -1252,6 +1278,14 @@ func ResetContextOfStmt(ctx sessionctx.Context, s ast.StmtNode) (err error) {
 		sc.IgnoreZeroInDate = !vars.StrictSQLMode || stmt.IgnoreErr
 		sc.Priority = stmt.Priority
 	case *ast.CreateTableStmt, *ast.AlterTableStmt:
+		if ctx.GetSessionVars().CreateTableInsertingID != 0 {
+			// in a 'inserting data from select' state of creating table.
+			sc.InInsertStmt = true
+			sc.BadNullAsWarning = !vars.StrictSQLMode
+			sc.TruncateAsWarning = !vars.StrictSQLMode
+			sc.DividedByZeroAsWarning = !vars.StrictSQLMode
+			sc.IgnoreZeroInDate = !vars.StrictSQLMode
+		}
 		// Make sure the sql_mode is strict when checking column default value.
 	case *ast.LoadDataStmt:
 		sc.DupKeyAsWarning = true
