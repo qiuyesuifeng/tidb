@@ -268,6 +268,7 @@ func setCharsetCollationFlenDecimal(tp *types.FieldType) error {
 	return nil
 }
 
+// buildColumnAndConstraint builds table.Column from ast.ColumnDef and ast.Constraint
 // outPriKeyConstraint is the primary key constraint out of column definition. such as: create table t1 (id int , age int, primary key(id));
 func buildColumnAndConstraint(ctx sessionctx.Context, offset int,
 	colDef *ast.ColumnDef, outPriKeyConstraint *ast.Constraint) (*table.Column, []*ast.Constraint, error) {
@@ -889,6 +890,7 @@ func (d *ddl) CreateTableWithLike(ctx sessionctx.Context, ident, referIdent ast.
 	tblInfo.AutoIncID = 0
 	tblInfo.ForeignKeys = nil
 	tblInfo.ID, err = d.genGlobalID()
+	tblInfo.State = model.StateNone
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -897,7 +899,7 @@ func (d *ddl) CreateTableWithLike(ctx sessionctx.Context, ident, referIdent ast.
 		TableID:    tblInfo.ID,
 		Type:       model.ActionCreateTable,
 		BinlogInfo: &model.HistoryInfo{},
-		Args:       []interface{}{tblInfo},
+		Args:       []interface{}{tblInfo, false /*withSelect*/, 0 /*snapshotTS*/},
 	}
 
 	err = d.doDDLJob(ctx, job)
@@ -905,7 +907,7 @@ func (d *ddl) CreateTableWithLike(ctx sessionctx.Context, ident, referIdent ast.
 	return errors.Trace(err)
 }
 
-func (d *ddl) CreateTable(ctx sessionctx.Context, s *ast.CreateTableStmt) (err error) {
+func (d *ddl) CreateTable(ctx sessionctx.Context, s *ast.CreateTableStmt, snapshotTS uint64) (err error) {
 	ident := ast.Ident{Schema: s.Table.Schema, Name: s.Table.Name}
 	if s.ReferTable != nil {
 		referIdent := ast.Ident{Schema: s.ReferTable.Schema, Name: s.ReferTable.Name}
@@ -965,33 +967,18 @@ func (d *ddl) CreateTable(ctx sessionctx.Context, s *ast.CreateTableStmt) (err e
 		return errors.Trace(err)
 	}
 
-	if pi != nil && pi.Type == model.PartitionTypeRange {
-		// Only range type partition is now supported.
-		// Range columns partition only implements the parser, so it will not be checked.
-		if s.Partition.ColumnNames == nil {
-			if err = checkPartitionNameUnique(tbInfo, pi); err != nil {
-				return errors.Trace(err)
-			}
-
-			if err = checkCreatePartitionValue(ctx, tbInfo, pi, cols); err != nil {
-				return errors.Trace(err)
-			}
-
-			if err = checkAddPartitionTooManyPartitions(len(pi.Definitions)); err != nil {
-				return errors.Trace(err)
-			}
-
-			if err = checkPartitionFuncValid(ctx, tbInfo, s.Partition.Expr); err != nil {
-				return errors.Trace(err)
-			}
-
-			if err = checkPartitionFuncType(ctx, s, cols, tbInfo); err != nil {
-				return errors.Trace(err)
-			}
-
-			if err = checkRangePartitioningKeysConstraints(ctx, s, tbInfo, newConstraints); err != nil {
-				return errors.Trace(err)
-			}
+	if pi != nil {
+		switch pi.Type {
+		case model.PartitionTypeRange:
+			err = checkPartitionByRange(ctx, tbInfo, pi, s, cols, newConstraints)
+		case model.PartitionTypeHash:
+			err = checkPartitionByHash(pi)
+		}
+		if err != nil {
+			return errors.Trace(err)
+		}
+		if err = checkRangePartitioningKeysConstraints(ctx, s, tbInfo, newConstraints); err != nil {
+			return errors.Trace(err)
 		}
 		tbInfo.Partition = pi
 	}
@@ -1003,7 +990,7 @@ func (d *ddl) CreateTable(ctx sessionctx.Context, s *ast.CreateTableStmt) (err e
 		TableID:    tbInfo.ID,
 		Type:       model.ActionCreateTable,
 		BinlogInfo: &model.HistoryInfo{},
-		Args:       []interface{}{tbInfo},
+		Args:       []interface{}{tbInfo, s.Select != nil, snapshotTS},
 	}
 
 	err = handleTableOptions(s.Options, tbInfo)
@@ -1108,6 +1095,41 @@ func (d *ddl) CreateStream(ctx sessionctx.Context, s *ast.CreateStreamStmt) (err
 
 	err = d.callHookOnChanged(err)
 	return errors.Trace(err)
+}
+
+func checkPartitionByHash(pi *model.PartitionInfo) error {
+	if err := checkAddPartitionTooManyPartitions(pi.Num); err != nil {
+		return errors.Trace(err)
+	}
+	return nil
+}
+
+func checkPartitionByRange(ctx sessionctx.Context, tbInfo *model.TableInfo, pi *model.PartitionInfo, s *ast.CreateTableStmt, cols []*table.Column, newConstraints []*ast.Constraint) error {
+	// Range columns partition only implements the parser, so it will not be checked.
+	if s.Partition.ColumnNames != nil {
+		return nil
+	}
+
+	if err := checkPartitionNameUnique(tbInfo, pi); err != nil {
+		return errors.Trace(err)
+	}
+
+	if err := checkCreatePartitionValue(ctx, tbInfo, pi, cols); err != nil {
+		return errors.Trace(err)
+	}
+
+	if err := checkAddPartitionTooManyPartitions(uint64(len(pi.Definitions))); err != nil {
+		return errors.Trace(err)
+	}
+
+	if err := checkPartitionFuncValid(ctx, tbInfo, s.Partition.Expr); err != nil {
+		return errors.Trace(err)
+	}
+
+	if err := checkPartitionFuncType(ctx, s, cols, tbInfo); err != nil {
+		return errors.Trace(err)
+	}
+	return nil
 }
 
 func checkCharsetAndCollation(cs string, co string) error {
@@ -1456,7 +1478,7 @@ func (d *ddl) AddTablePartitions(ctx sessionctx.Context, ident ast.Ident, spec *
 		return errors.Trace(err)
 	}
 
-	err = checkAddPartitionTooManyPartitions(len(meta.Partition.Definitions) + len(partInfo.Definitions))
+	err = checkAddPartitionTooManyPartitions(uint64(len(meta.Partition.Definitions) + len(partInfo.Definitions)))
 	if err != nil {
 		return errors.Trace(err)
 	}

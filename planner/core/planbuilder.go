@@ -14,6 +14,7 @@
 package core
 
 import (
+	"bytes"
 	"fmt"
 	"strings"
 
@@ -94,17 +95,19 @@ const (
 	whereClause
 	groupByClause
 	showStatement
+	globalOrderByClause
 )
 
 var clauseMsg = map[clauseCode]string{
-	unknowClause:  "",
-	fieldList:     "field list",
-	havingClause:  "having clause",
-	onClause:      "on clause",
-	orderByClause: "order clause",
-	whereClause:   "where clause",
-	groupByClause: "group statement",
-	showStatement: "show statement",
+	unknowClause:        "",
+	fieldList:           "field list",
+	havingClause:        "having clause",
+	onClause:            "on clause",
+	orderByClause:       "order clause",
+	whereClause:         "where clause",
+	groupByClause:       "group statement",
+	showStatement:       "show statement",
+	globalOrderByClause: "global ORDER clause",
 }
 
 // PlanBuilder builds Plan from an ast.Node.
@@ -116,7 +119,7 @@ type PlanBuilder struct {
 	inUpdateStmt bool
 	// colMapper stores the column that must be pre-resolved.
 	colMapper map[*ast.ColumnNameExpr]int
-	// Collect the visit information for privilege check.
+	// visitInfo collects the visit information for privilege check.
 	visitInfo     []visitInfo
 	tableHintInfo []tableHintInfo
 	optFlag       uint64
@@ -131,6 +134,8 @@ type PlanBuilder struct {
 	// inStraightJoin represents whether the current "SELECT" statement has
 	// "STRAIGHT_JOIN" option.
 	inStraightJoin bool
+
+	streamColName string
 }
 
 // GetVisitInfo gets the visitInfo of the PlanBuilder.
@@ -195,7 +200,7 @@ func (b *PlanBuilder) Build(node ast.Node) (Plan, error) {
 		*ast.GrantStmt, *ast.DropUserStmt, *ast.AlterUserStmt, *ast.RevokeStmt, *ast.KillStmt, *ast.DropStatsStmt:
 		return b.buildSimple(node.(ast.StmtNode)), nil
 	case ast.DDLNode:
-		return b.buildDDL(x), nil
+		return b.buildDDL(x)
 	}
 	return nil, ErrUnsupportedType.GenWithStack("Unsupported type %T", node)
 }
@@ -214,29 +219,29 @@ func (b *PlanBuilder) buildExecute(v *ast.ExecuteStmt) (Plan, error) {
 }
 
 func (b *PlanBuilder) buildDo(v *ast.DoStmt) (Plan, error) {
+	var p LogicalPlan
 	dual := LogicalTableDual{RowCount: 1}.Init(b.ctx)
-
-	p := LogicalProjection{Exprs: make([]expression.Expression, 0, len(v.Exprs))}.Init(b.ctx)
+	dual.SetSchema(expression.NewSchema())
+	p = dual
+	proj := LogicalProjection{Exprs: make([]expression.Expression, 0, len(v.Exprs))}.Init(b.ctx)
 	schema := expression.NewSchema(make([]*expression.Column, 0, len(v.Exprs))...)
 	for _, astExpr := range v.Exprs {
-		expr, _, err := b.rewrite(astExpr, dual, nil, true)
+		expr, np, err := b.rewrite(astExpr, p, nil, true)
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
-		p.Exprs = append(p.Exprs, expr)
+		p = np
+		proj.Exprs = append(proj.Exprs, expr)
 		schema.Append(&expression.Column{
 			UniqueID: b.ctx.GetSessionVars().AllocPlanColumnID(),
 			RetType:  expr.GetType(),
 		})
 	}
-	if dual.schema == nil {
-		dual.schema = expression.NewSchema()
-	}
-	p.SetChildren(dual)
-	p.self = p
-	p.SetSchema(schema)
-	p.calculateNoDelay = true
-	return p, nil
+	proj.SetChildren(p)
+	proj.self = proj
+	proj.SetSchema(schema)
+	proj.calculateNoDelay = true
+	return proj, nil
 }
 
 func (b *PlanBuilder) buildSet(v *ast.SetStmt) (Plan, error) {
@@ -272,7 +277,7 @@ func (b *PlanBuilder) buildSet(v *ast.SetStmt) (Plan, error) {
 	return p, nil
 }
 
-// Detect aggregate function or groupby clause.
+// detectSelectAgg detects aggregate function or groupby clause.
 func (b *PlanBuilder) detectSelectAgg(sel *ast.SelectStmt) bool {
 	if sel.GroupBy != nil {
 		return true
@@ -401,8 +406,11 @@ func (b *PlanBuilder) buildPrepare(x *ast.PrepareStmt) Plan {
 		Name: x.Name,
 	}
 	if x.SQLVar != nil {
-		// TODO: Prepared statement from variable expression do not work as expected.
-		// p.SQLText, _ = x.SQLVar.GetValue().(string)
+		if v, ok := b.ctx.GetSessionVars().Users[x.SQLVar.Name]; ok {
+			p.SQLText = v
+		} else {
+			p.SQLText = "NULL"
+		}
 	} else {
 		p.SQLText = x.SQLText
 	}
@@ -961,7 +969,7 @@ func (b *PlanBuilder) buildSimple(node ast.StmtNode) Plan {
 		b.visitInfo = appendVisitInfo(b.visitInfo, mysql.CreateUserPriv, "", "", "")
 	case *ast.GrantStmt:
 		b.visitInfo = collectVisitInfoFromGrantStmt(b.visitInfo, raw)
-	case *ast.SetPwdStmt, *ast.RevokeStmt:
+	case *ast.RevokeStmt:
 		b.visitInfo = appendVisitInfo(b.visitInfo, mysql.SuperPriv, "", "", "")
 	case *ast.KillStmt:
 		// If you have the SUPER privilege, you can kill all threads and statements.
@@ -1395,7 +1403,9 @@ func (b *PlanBuilder) buildLoadStats(ld *ast.LoadStatsStmt) Plan {
 	return p
 }
 
-func (b *PlanBuilder) buildDDL(node ast.DDLNode) Plan {
+func (b *PlanBuilder) buildDDL(node ast.DDLNode) (Plan, error) {
+	var err error
+	p := new(DDL)
 	switch v := node.(type) {
 	case *ast.AlterTableStmt:
 		b.visitInfo = append(b.visitInfo, visitInfo{
@@ -1427,6 +1437,7 @@ func (b *PlanBuilder) buildDDL(node ast.DDLNode) Plan {
 				table:     v.ReferTable.Name.L,
 			})
 		}
+		err = b.buildCreateTableInsertPlan(p, v)
 	case *ast.DropDatabaseStmt:
 		b.visitInfo = append(b.visitInfo, visitInfo{
 			privilege: mysql.DropPriv,
@@ -1465,27 +1476,36 @@ func (b *PlanBuilder) buildDDL(node ast.DDLNode) Plan {
 		})
 	}
 
-	p := &DDL{Statement: node}
-	return p
+	p.Statement = node
+	return p, err
 }
 
 // buildTrace builds a trace plan. Inside this method, it first optimize the
 // underlying query and then constructs a schema, which will be used to constructs
 // rows result.
 func (b *PlanBuilder) buildTrace(trace *ast.TraceStmt) (Plan, error) {
-	if _, ok := trace.Stmt.(*ast.SelectStmt); !ok {
-		return nil, errors.New("trace only supports select query")
+	if _, ok := trace.Stmt.(*ast.SelectStmt); !ok && trace.Format == "row" {
+		return nil, errors.New("trace only supports select query when format is row")
 	}
 
-	p := &Trace{StmtNode: trace.Stmt}
+	p := &Trace{StmtNode: trace.Stmt, Format: trace.Format}
 
-	retFields := []string{"operation", "duration", "spanID"}
-	schema := expression.NewSchema(make([]*expression.Column, 0, len(retFields))...)
-	schema.Append(buildColumn("", "operation", mysql.TypeString, mysql.MaxBlobWidth))
-
-	schema.Append(buildColumn("", "startTS", mysql.TypeString, mysql.MaxBlobWidth))
-	schema.Append(buildColumn("", "duration", mysql.TypeString, mysql.MaxBlobWidth))
-	p.SetSchema(schema)
+	switch trace.Format {
+	case "row":
+		retFields := []string{"operation", "duration", "spanID"}
+		schema := expression.NewSchema(make([]*expression.Column, 0, len(retFields))...)
+		schema.Append(buildColumn("", "operation", mysql.TypeString, mysql.MaxBlobWidth))
+		schema.Append(buildColumn("", "startTS", mysql.TypeString, mysql.MaxBlobWidth))
+		schema.Append(buildColumn("", "duration", mysql.TypeString, mysql.MaxBlobWidth))
+		p.SetSchema(schema)
+	case "json":
+		retFields := []string{"json"}
+		schema := expression.NewSchema(make([]*expression.Column, 0, len(retFields))...)
+		schema.Append(buildColumn("", "operation", mysql.TypeString, mysql.MaxBlobWidth))
+		p.SetSchema(schema)
+	default:
+		return nil, errors.New("trace format should be one of 'row' or 'json'")
+	}
 	return p, nil
 }
 
@@ -1521,6 +1541,169 @@ func (b *PlanBuilder) buildExplain(explain *ast.ExplainStmt) (Plan, error) {
 		return nil, err
 	}
 	return p, nil
+}
+
+// buildCreateTableInsertPlan builds insert plan for 'create table ... select' syntax, it also modify
+// the column definitions of `CreateTableStmt` by combining the columns from 'create table' part and 'select' part
+func (b *PlanBuilder) buildCreateTableInsertPlan(p *DDL, v *ast.CreateTableStmt) error {
+	if v.Select == nil {
+		return nil
+	}
+	selectPlan, err := b.Build(v.Select)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	var plan PhysicalPlan
+	plan, err = DoOptimize(b.optFlag, selectPlan.(LogicalPlan))
+	if err != nil {
+		return errors.Trace(err)
+	}
+	var colDefs []*ast.ColumnDef
+	// calculate column attributes for the resulting table
+	// see https://dev.mysql.com/doc/refman/5.7/en/create-table-select.html for more details
+	for _, colDef := range v.Cols {
+		found, err1 := plan.Schema().FindColumn(colDef.Name)
+		if err1 != nil {
+			return errors.Trace(err1)
+		}
+		if found == nil {
+			// columns named only in 'create table' part come first
+			colDefs = append(colDefs, colDef)
+		}
+	}
+	for _, col := range plan.Schema().Columns {
+		found := findColumn(col, v.Cols)
+		if found == nil {
+			// columns named in 'select' part come after
+			colDef, err1 := b.colToColumnDef(col, v.Table)
+			if err1 != nil {
+				return errors.Trace(err1)
+			}
+			colDefs = append(colDefs, colDef)
+		} else {
+			// columns named in both parts come after
+			colDefs = append(colDefs, found)
+		}
+	}
+
+	// replace original column definitions with the combined ones
+	v.Cols = colDefs
+
+	// handle generated columns
+	var mockColumns []*table.Column
+	var mockExprs []*expression.Column
+	for idx, colDef := range colDefs {
+		expr, mockColumn := buildMockColumn(colDef, idx)
+		mockExprs = append(mockExprs, expr)
+		mockColumns = append(mockColumns, mockColumn)
+	}
+	mockTablePlan := LogicalTableDual{}.Init(b.ctx)
+	mockTablePlan.SetSchema(expression.NewSchema(mockExprs...))
+
+	genCols, err := b.resolveGeneratedColumns(mockColumns, nil, mockTablePlan)
+
+	// handle insert columns
+	colMap := make(map[string]bool)
+	for _, col := range genCols.Columns {
+		colMap[col.Name.String()] = true
+	}
+	var insertCols []*ast.ColumnName
+	for _, col := range plan.Schema().Columns {
+		if _, ok := colMap[col.ColName.String()]; ok {
+			continue
+		}
+		insertCols = append(insertCols, &ast.ColumnName{Name: col.ColName})
+	}
+
+	p.InsertPlan = Insert{
+		Columns:    insertCols,
+		GenCols:    genCols,
+		SelectPlan: plan,
+	}
+	return nil
+}
+
+// colToColumnDef is used by 'create table ... select', it converts expression.Column `c` to ColumnDef:
+//  if `c` refers to a column of the source table, we copy some of the column attributes from the referred column.
+//  if `c` is an expression(for example, `count(*)`), the original table/column cannot be found.
+// see https://dev.mysql.com/doc/refman/5.7/en/create-table-select.html for more details
+func (b *PlanBuilder) colToColumnDef(c *expression.Column, t *ast.TableName) (*ast.ColumnDef, error) {
+	d := &ast.ColumnDef{}
+	d.Name = &ast.ColumnName{
+		Schema: t.Schema,
+		Table:  t.Name,
+		Name:   c.ColName,
+	}
+	d.Tp = types.CloneField(c.GetType())
+
+	// auto-increment attribute will not be preserved
+	d.Tp.Flag &= ^mysql.AutoIncrementFlag
+	// no index will be preserved
+	d.Tp.Flag &= ^mysql.PriKeyFlag
+	d.Tp.Flag &= ^mysql.UniqueKeyFlag
+	d.Tp.Flag &= ^mysql.MultipleKeyFlag
+
+	table, err := b.is.TableByName(c.DBName, c.OrigTblName)
+	if err != nil {
+		return d, nil
+	}
+	tblInfo := table.Meta()
+
+	isFound := false
+	for _, col := range tblInfo.Columns {
+		if col.Name.L == c.OrigColName.L && tblInfo.Name.L == c.OrigTblName.L {
+			isFound = true
+			// copy column comment
+			if len(col.Comment) > 0 {
+				option := &ast.ColumnOption{
+					Tp:     ast.ColumnOptionComment,
+					Expr:   ast.NewValueExpr(col.Comment),
+					Stored: false,
+				}
+				d.Options = append(d.Options, option)
+			}
+
+			// copy column default value
+			switch dv := col.DefaultValue.(type) {
+			case nil:
+				// Do nothing
+			case string:
+				if strings.ToUpper(dv) == strings.ToUpper(ast.CurrentTimestamp) {
+					option := &ast.ColumnOption{
+						Tp:   ast.ColumnOptionDefaultValue,
+						Expr: &ast.FuncCallExpr{FnName: model.NewCIStr(strings.ToUpper(ast.CurrentTimestamp))},
+					}
+					d.Options = append(d.Options, option)
+				} else {
+					option := &ast.ColumnOption{
+						Tp:   ast.ColumnOptionDefaultValue,
+						Expr: ast.NewValueExpr(dv),
+					}
+					d.Options = append(d.Options, option)
+				}
+			case uint64, float64:
+				// For numbers declared as `interface{}`, json package unmarshal them as `float64`
+				option := &ast.ColumnOption{
+					Tp:   ast.ColumnOptionDefaultValue,
+					Expr: ast.NewValueExpr(dv),
+				}
+				d.Options = append(d.Options, option)
+			case ast.ExprNode:
+				option := &ast.ColumnOption{
+					Tp:   ast.ColumnOptionDefaultValue,
+					Expr: dv,
+				}
+				d.Options = append(d.Options, option)
+			default:
+				return nil, errors.Errorf("Unexpected default value: '%s'", dv)
+			}
+		}
+	}
+	if !isFound {
+		return nil, ErrUnknownColumn.GenWithStackByArgs(c.OrigColName, c.OrigTblName)
+	}
+
+	return d, nil
 }
 
 func buildShowProcedureSchema() *expression.Schema {
@@ -1613,7 +1796,7 @@ func buildShowSchema(s *ast.ShowStmt) (schema *expression.Schema) {
 			"Create_options", "Comment"}
 		ftypes = []byte{mysql.TypeVarchar, mysql.TypeVarchar, mysql.TypeLonglong, mysql.TypeVarchar, mysql.TypeLonglong, mysql.TypeLonglong,
 			mysql.TypeLonglong, mysql.TypeLonglong, mysql.TypeLonglong, mysql.TypeLonglong, mysql.TypeLonglong,
-			mysql.TypeVarchar, mysql.TypeDatetime, mysql.TypeDatetime, mysql.TypeVarchar, mysql.TypeVarchar,
+			mysql.TypeDatetime, mysql.TypeDatetime, mysql.TypeDatetime, mysql.TypeVarchar, mysql.TypeVarchar,
 			mysql.TypeVarchar, mysql.TypeVarchar}
 	case ast.ShowColumns:
 		names = table.ColDescFieldNames(s.Full)
@@ -1711,4 +1894,39 @@ func buildChecksumTableSchema() *expression.Schema {
 	schema.Append(buildColumn("", "Total_kvs", mysql.TypeLonglong, 22))
 	schema.Append(buildColumn("", "Total_bytes", mysql.TypeLonglong, 22))
 	return schema
+}
+
+// buildMockColumn mocks `expression.Column` and `table.Column` to resolve generated columns, because some columns are
+// not generated / not be public in planner
+func buildMockColumn(colDef *ast.ColumnDef, idx int) (*expression.Column, *table.Column) {
+	expr := &expression.Column{
+		RetType: colDef.Tp,
+		ColName: colDef.Name.Name,
+		Index:   idx,
+	}
+	mockColumn := &table.Column{
+		ColumnInfo: &model.ColumnInfo{Name: colDef.Name.Name},
+	}
+	for _, option := range colDef.Options {
+		if option.Tp == ast.ColumnOptionGenerated && option.Expr != nil {
+			var buf = bytes.NewBuffer([]byte{})
+			option.Expr.Format(buf)
+
+			mockColumn.GeneratedExprString = buf.String()
+			mockColumn.GeneratedExpr = option.Expr
+			mockColumn.GeneratedStored = option.Stored
+			break
+		}
+	}
+	return expr, mockColumn
+}
+
+// findColumn tries to match a `Column` with a `ColumnDef` by their names
+func findColumn(column *expression.Column, cols []*ast.ColumnDef) *ast.ColumnDef {
+	for _, col := range cols {
+		if col.Name.Name.L == column.ColName.L {
+			return col
+		}
+	}
+	return nil
 }
