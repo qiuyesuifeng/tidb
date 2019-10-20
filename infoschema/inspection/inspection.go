@@ -1,49 +1,65 @@
 package inspection
 
 import (
+	"errors"
+	"fmt"
+	"time"
+
 	"github.com/pingcap/parser"
 	"github.com/pingcap/parser/ast"
+	"github.com/pingcap/tidb/domain"
+
 	"github.com/pingcap/parser/model"
-	"github.com/pingcap/parser/mysql"
-	"github.com/pingcap/tidb/ddl"
-	"github.com/pingcap/tidb/infoschema"
-	"github.com/pingcap/tidb/kv"
-	"github.com/pingcap/tidb/meta/autoid"
 	"github.com/pingcap/tidb/sessionctx"
-	"github.com/pingcap/tidb/table"
-	"github.com/pingcap/tidb/types"
 )
 
-func InitInspectionDB(name string) {
-	p := parser.New()
-	tbls := make([]*model.TableInfo, 0)
-	dbID := autoid.GenLocalSchemaID()
-
-	for _, sql := range inspectionTables {
-		stmt, err := p.ParseOneStmt(sql, "", "")
-		if err != nil {
-			panic(err)
-		}
-		meta, err := ddl.BuildTableInfoFromAST(stmt.(*ast.CreateTableStmt))
-		if err != nil {
-			panic(err)
-		}
-		tbls = append(tbls, meta)
-		meta.ID = autoid.GenLocalSchemaID()
-		for _, c := range meta.Columns {
-			c.ID = autoid.GenLocalSchemaID()
-		}
+func NewInspectionHelper (ctx sessionctx.Context) *InspectionHelper {
+	return &InspectionHelper{
+		ctx: ctx,
+		p: parser.New(),
+		dbName: fmt.Sprintf("%s_%s", "tidb_inspection",time.Now().Format("20060102150405")),
 	}
-	dbInfo := &model.DBInfo{
-		ID:      dbID,
-		Name:    model.NewCIStr(name),
-		Charset: mysql.DefaultCharset,
-		Collate: mysql.DefaultCollationName,
-		Tables:  tbls,
-	}
-	infoschema.RegisterVirtualTable(dbInfo, tableFromMeta)
 }
 
+type InspectionHelper struct {
+	ctx sessionctx.Context
+	p *parser.Parser
+	dbName string
+}
+
+func (i *InspectionHelper) GetDBName() string {
+	return i.dbName
+}
+
+func (i *InspectionHelper) CreateInspectionDB() error {
+	err := domain.GetDomain(i.ctx).DDL().CreateSchema(i.ctx, model.NewCIStr(i.dbName), nil)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (i *InspectionHelper) CreateInspectionTables() error {
+	// Create inspection tables
+	for _, template := range inspectionTables {
+		sql := fmt.Sprintf(template, i.dbName)
+		stmt, err := i.p.ParseOneStmt(sql, "", "")
+		if err != nil {
+			return err
+		}
+		s, ok := stmt.(*ast.CreateTableStmt)
+		if !ok {
+			return errors.New(fmt.Sprintf("Fail to create inspection table. Maybe create table statment is illegal: %s", sql))
+		}
+		s.Table.TableInfo = &model.TableInfo{IsInspection:true, InspectionInfo: make(map[string]string)}
+		if err := domain.GetDomain(i.ctx).DDL().CreateTable(i.ctx, s); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+/* TODO: The Following are inspection tables. They should be memtable like information schemas
 func tableFromMeta(alloc autoid.Allocator, meta *model.TableInfo) (table.Table, error) {
 	return createInspectionTable(meta), nil
 }
@@ -145,3 +161,4 @@ func (vt *inspectTable) IterRecords(ctx sessionctx.Context, startKey kv.Key, col
 	return nil
 }
 
+ */

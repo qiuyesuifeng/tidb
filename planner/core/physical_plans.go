@@ -54,10 +54,20 @@ var (
 	_ PhysicalPlan = &PhysicalWindow{}
 	_ PhysicalPlan = &BatchPointGetPlan{}
 	_ PhysicalPlan = &PhysicalStreamReader{}
+	_ PhysicalPlan = &PhysicalInspectionReader{}
 )
 
 // PhysicalStreamReader is the table reader in tidb.
 type PhysicalStreamReader struct {
+	physicalSchemaProducer
+	Table       *model.TableInfo
+	Columns     []*model.ColumnInfo
+	TableAsName *model.CIStr
+	DBName      model.CIStr
+}
+
+// PhysicalInspectionReader is the inspection table reader in tidb.
+type PhysicalInspectionReader struct {
 	physicalSchemaProducer
 	Table       *model.TableInfo
 	Columns     []*model.ColumnInfo

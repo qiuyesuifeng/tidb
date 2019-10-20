@@ -33,6 +33,7 @@ import (
 	"github.com/pingcap/tidb/domain"
 	"github.com/pingcap/tidb/expression"
 	"github.com/pingcap/tidb/infoschema"
+	"github.com/pingcap/tidb/infoschema/inspection"
 	"github.com/pingcap/tidb/kv"
 	plannercore "github.com/pingcap/tidb/planner/core"
 	"github.com/pingcap/tidb/sessionctx"
@@ -1608,6 +1609,7 @@ func ResetContextOfStmt(ctx sessionctx.Context, s ast.StmtNode) (err error) {
 type TiDBInspectionExec struct {
 	baseExecutor
 	done bool
+	i *inspection.InspectionHelper
 }
 
 // Open implements the Executor Open interface.
@@ -1618,6 +1620,7 @@ func (e *TiDBInspectionExec) Open(ctx context.Context) error {
 
 	// dom := domain.GetDomain(e.ctx)
 	// e.result = dom.ShowSlowQuery(e.ShowSlow)
+	e.i = inspection.NewInspectionHelper(e.ctx)
 	return nil
 }
 
@@ -1629,11 +1632,18 @@ func (e *TiDBInspectionExec) Next(ctx context.Context, req *chunk.Chunk) error {
 	}
 
 	// Step 1. Create inspection db
-	inspectionDBName := fmt.Sprintf("%s_%s", "tidb_inspection",time.Now().Format("20060102150405"))
-	err := domain.GetDomain(e.ctx).DDL().CreateSchema(e.ctx, model.NewCIStr(inspectionDBName), nil)
 	req.AppendInt64(0, 0)
 	req.AppendString(1, "create inspection database")
-	if err != nil {
+	if err := e.i.CreateInspectionDB(); err != nil {
+		req.AppendString(2, err.Error())
+	} else {
+		req.AppendString(2, "finished")
+	}
+
+	// Step 2. Create inspection table
+	req.AppendInt64(0, 0)
+	req.AppendString(1, "create inspection tables")
+	if err := e.i.CreateInspectionTables(); err != nil {
 		req.AppendString(2, err.Error())
 	} else {
 		req.AppendString(2, "finished")

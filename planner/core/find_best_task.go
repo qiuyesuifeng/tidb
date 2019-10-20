@@ -401,6 +401,33 @@ func (ds *DataSource) findBestTask(prop *property.PhysicalProperty) (t task, err
 		return &t, nil
 	}
 
+	// Inspection Tables.
+	if ds.tableInfo.IsInspection == true {
+		sr := PhysicalInspectionReader{
+			Table:       ds.tableInfo,
+			Columns:     ds.Columns,
+			TableAsName: ds.TableAsName,
+			DBName:      ds.DBName,
+		}.Init(ds.ctx, ds.blockOffset)
+
+		sr.SetSchema(ds.schema)
+		sr.stats = &property.StatsInfo{RowCount: 10}
+		t := rootTask{p: sr}
+		// access where condition
+		for _, path := range ds.possibleAccessPaths {
+			if path.isTablePath {
+				tableConds := path.tableFilters
+				if tableConds != nil {
+					tableSel := PhysicalSelection{Conditions: tableConds}.
+						Init(ds.ctx, ds.stats.ScaleByExpectCnt(0), ds.blockOffset)
+					tableSel.SetChildren(t.p)
+					t.p = tableSel
+				}
+			}
+		}
+		return &t, nil
+	}
+
 	// If ds is an inner plan in an IndexJoin, the IndexJoin will generate an inner plan by itself,
 	// and set inner child prop nil, so here we do nothing.
 	if prop == nil {

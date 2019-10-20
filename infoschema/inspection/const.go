@@ -14,11 +14,10 @@
 package inspection
 
 var inspectionTables = []string{
-	tableGlobalStatus,
+	tableTest,
 }
 
-// tableGlobalStatus contains the column name definitions for table global_status, same as MySQL.
-const tableGlobalStatus = "CREATE TABLE performance_schema.global_status(" +
-	"VARIABLE_NAME VARCHAR(64) not null," +
-	"VARIABLE_VALUE VARCHAR(1024));"
+const tableTest = "CREATE TABLE %s.test_table(" +
+	"click_id bigint(20)," +
+	"user_id bigint(20));"
 

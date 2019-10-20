@@ -202,7 +202,8 @@ func (b *executorBuilder) build(p plannercore.Plan) Executor {
 		return b.buildTableReader(v)
 	case *plannercore.PhysicalStreamReader:
 		return b.buildStreamReader(v)
-
+	case *plannercore.PhysicalInspectionReader:
+		return b.buildInspectionReader(v)
 	case *plannercore.PhysicalIndexReader:
 		return b.buildIndexReader(v)
 	case *plannercore.PhysicalIndexLookUpReader:
@@ -230,6 +231,15 @@ func (b *executorBuilder) buildStreamReader(v *plannercore.PhysicalStreamReader)
 		Columns:      v.Columns,
 	}
 }
+
+func (b *executorBuilder) buildInspectionReader(v *plannercore.PhysicalInspectionReader) *InspectionReaderExecutor {
+	return &InspectionReaderExecutor{
+		baseExecutor: newBaseExecutor(b.ctx, v.Schema(), v.ExplainID()),
+		Table:        v.Table,
+		Columns:      v.Columns,
+	}
+}
+
 
 func (b *executorBuilder) buildCancelDDLJobs(v *plannercore.CancelDDLJobs) Executor {
 	e := &CancelDDLJobsExec{

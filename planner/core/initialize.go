@@ -90,6 +90,10 @@ const (
 	// TypeStreamReader is the type of TableReader.
 	TypeStreamReader = "StreamReader"
 
+	// TypeInspectionReader is the type of TableReader.
+	TypeInspectionReader = "InspectionReader"
+
+
 	// TypeWindow is the type of Window.
 	TypeWindow = "Window"
 	// TypeTableGather is the type of TableGather.
@@ -108,6 +112,11 @@ func (la LogicalAggregation) Init(ctx sessionctx.Context, offset int) *LogicalAg
 
 func (p PhysicalStreamReader) Init(ctx sessionctx.Context, offset int) *PhysicalStreamReader {
 	p.basePhysicalPlan = newBasePhysicalPlan(ctx, TypeStreamReader, &p, offset)
+	return &p
+}
+
+func (p PhysicalInspectionReader) Init(ctx sessionctx.Context, offset int) *PhysicalInspectionReader {
+	p.basePhysicalPlan = newBasePhysicalPlan(ctx, TypeInspectionReader, &p, offset)
 	return &p
 }
 

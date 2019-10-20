@@ -1401,6 +1401,13 @@ func buildTableInfoWithCheck(ctx sessionctx.Context, d *ddl, s *ast.CreateTableS
 		return nil, errors.Trace(err)
 	}
 
+
+	// Deal with inspection specific infos
+	if s.Table.TableInfo != nil {
+		tbInfo.IsInspection = s.Table.TableInfo.IsInspection
+		tbInfo.InspectionInfo = s.Table.TableInfo.InspectionInfo
+	}
+
 	return tbInfo, nil
 }
 
