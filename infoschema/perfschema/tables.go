@@ -32,6 +32,7 @@ const (
 	tableNameAllocsProfile                   = "events_allocs_profile"
 	tableNameBlockProfile                    = "events_block_profile"
 	tableNameGoroutines                      = "events_goroutines"
+	tableNameTiKVCpuProfile                  = "events_tikv_cpu_profile"
 )
 
 // perfSchemaTable stands for the fake table all its data is in the memory.
@@ -108,6 +109,8 @@ func (vt *perfSchemaTable) getRows(ctx sessionctx.Context, cols []*table.Column)
 		fullRows, err = profileGraph("block")
 	case tableNameGoroutines:
 		fullRows, err = goroutinesList()
+	case tableNameTiKVCpuProfile:
+		fullRows, err = tikvCpuProfileGraph()
 	}
 	if err != nil {
 		return

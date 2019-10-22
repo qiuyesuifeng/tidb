@@ -46,6 +46,7 @@ var perfSchemaTables = []string{
 	tableAllocsProfile,
 	tableBlockProfile,
 	tableGoroutine,
+	tableTiKVCpuProfile,
 }
 
 // tableGlobalStatus contains the column name definitions for table global_status, same as MySQL.
@@ -444,3 +445,10 @@ const tableGoroutine = "CREATE TABLE IF NOT EXISTS " + tableNameGoroutines + " (
 	"ID INT(8) NOT NULL," +
 	"STATE VARCHAR(16) NOT NULL," +
 	"LOCATION VARCHAR(512));"
+
+const tableTiKVCpuProfile = "CREATE TABLE IF NOT EXISTS " + tableNameTiKVCpuProfile + " (" +
+"FUNCTION VARCHAR(512) NOT NULL," +
+"PERCENT_ABS VARCHAR(8) NOT NULL," +
+"PERCENT_REL VARCHAR(8) NOT NULL," +
+"DEPTH INT(8) NOT NULL," +
+"FILE VARCHAR(512) NOT NULL);"

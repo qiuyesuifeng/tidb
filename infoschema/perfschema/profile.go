@@ -17,6 +17,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"net/http"
 	"runtime/pprof"
 	"strconv"
 	"strings"
@@ -196,6 +197,16 @@ func cpuProfileGraph() ([][]types.Datum, error) {
 	time.Sleep(20 * time.Second)
 	pprof.StopCPUProfile()
 	return profileReaderToDatums(buffer)
+}
+
+// TODO: use cluster info to get all tikv profile
+func tikvCpuProfileGraph() ([][]types.Datum, error) {
+	resp, err := http.Get("http://127.0.0.1:49904/pprof/cpu?seconds=20")
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	return profileReaderToDatums(resp.Body)
 }
 
 func profileGraph(name string) ([][]types.Datum, error) {
