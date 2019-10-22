@@ -17,11 +17,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/jeremywohl/flatten"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/parser/charset"
 	"github.com/pingcap/parser/model"
@@ -87,6 +89,7 @@ const (
 	tableTiKVRegionPeers                    = "TIKV_REGION_PEERS"
 	tableTiDBServersInfo                    = "TIDB_SERVERS_INFO"
 	tableTiDBClusterInfo                    = "TIDB_CLUSTER_INFO"
+	tableTiDBClusterConfig                  = "TIDB_CLUSTER_CONFIG"
 )
 
 type columnInfo struct {
@@ -670,6 +673,13 @@ var tableTiDBClusterInfoCols = []columnInfo{
 	{"STATUS_ADDRESS", mysql.TypeVarchar, 64, 0, nil, nil},
 	{"VERSION", mysql.TypeVarchar, 64, 0, nil, nil},
 	{"GIT_HASH", mysql.TypeVarchar, 64, 0, nil, nil},
+}
+
+var tableTiDBClusterConfigCols = []columnInfo{
+	{"SERVER_TYPE", mysql.TypeVarchar, 8, 0, nil, nil},
+	{"INSTANCE", mysql.TypeVarchar, 64, 0, nil, nil},
+	{"NAME", mysql.TypeVarchar, 256, 0, nil, nil},
+	{"VALUE", mysql.TypeVarchar, 128, 0, nil, nil},
 }
 
 func dataForTiKVRegionStatus(ctx sessionctx.Context) (records [][]types.Datum, err error) {
@@ -1939,7 +1949,36 @@ func dataForTiDBClusterInfo(ctx sessionctx.Context) ([][]types.Datum, error) {
 		rows = append(rows, row)
 		idx++
 	}
+	return rows, nil
+}
 
+// TODO: poc for config flatten, fetch all servers
+func dataForClusterConfig() ([][]types.Datum, error) {
+	resp, err := http.Get("http://127.0.0.1:49904/config")
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var nested map[string]interface{}
+	if err = json.NewDecoder(resp.Body).Decode(&nested); err != nil {
+		return nil, err
+	}
+	data, err := flatten.Flatten(nested, "", flatten.DotStyle)
+	if err != nil {
+		return nil, err
+	}
+	var rows [][]types.Datum
+	instance := types.NewStringDatum("127.0.0.1:49904")
+	serverTp := types.NewStringDatum("TiKV")
+	for key, val := range data {
+		rows = append(rows, []types.Datum{
+			serverTp,
+			instance,
+			types.NewStringDatum(key),
+			types.NewStringDatum(fmt.Sprintf("%v", val)),
+		})
+	}
 	return rows, nil
 }
 
@@ -1985,6 +2024,7 @@ var tableNameToColumns = map[string][]columnInfo{
 	tableTiKVRegionPeers:                    tableTiKVRegionPeersCols,
 	tableTiDBServersInfo:                    tableTiDBServersInfoCols,
 	tableTiDBClusterInfo:                    tableTiDBClusterInfoCols,
+	tableTiDBClusterConfig:                  tableTiDBClusterConfigCols,
 }
 
 func createInfoSchemaTable(handle *Handle, meta *model.TableInfo) *infoschemaTable {
@@ -2092,6 +2132,8 @@ func (it *infoschemaTable) getRows(ctx sessionctx.Context, cols []*table.Column)
 		fullRows, err = dataForServersInfo()
 	case tableTiDBClusterInfo:
 		fullRows, err = dataForTiDBClusterInfo(ctx)
+	case tableTiDBClusterConfig:
+		fullRows, err = dataForClusterConfig()
 	}
 	if err != nil {
 		return nil, err
