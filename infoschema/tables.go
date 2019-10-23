@@ -676,9 +676,10 @@ var tableTiDBClusterInfoCols = []columnInfo{
 }
 
 var tableTiDBClusterConfigCols = []columnInfo{
-	{"SERVER_TYPE", mysql.TypeVarchar, 8, 0, nil, nil},
-	{"INSTANCE", mysql.TypeVarchar, 64, 0, nil, nil},
-	{"NAME", mysql.TypeVarchar, 256, 0, nil, nil},
+	{"TYPE", mysql.TypeVarchar, 64, 0, nil, nil},
+	{"NAME", mysql.TypeVarchar, 64, 0, nil, nil},
+	{"ADDRESS", mysql.TypeVarchar, 64, 0, nil, nil},
+	{"KEY", mysql.TypeVarchar, 256, 0, nil, nil},
 	{"VALUE", mysql.TypeVarchar, 128, 0, nil, nil},
 }
 
@@ -1952,34 +1953,85 @@ func dataForTiDBClusterInfo(ctx sessionctx.Context) ([][]types.Datum, error) {
 	return rows, nil
 }
 
-// TODO: poc for config flatten, fetch all servers
-func dataForClusterConfig() ([][]types.Datum, error) {
-	resp, err := http.Get("http://127.0.0.1:49904/config")
+func dataForClusterConfig(ctx sessionctx.Context) ([][]types.Datum, error) {
+	sql := "SELECT type, name, address, status_address FROM INFORMATION_SCHEMA.TIDB_CLUSTER_INFO"
+	rows, _, err := ctx.(sqlexec.RestrictedSQLExecutor).ExecRestrictedSQL(sql)
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
 
-	var nested map[string]interface{}
-	if err = json.NewDecoder(resp.Body).Decode(&nested); err != nil {
-		return nil, err
+	type result struct {
+		rows [][]types.Datum
+		err  error
 	}
-	data, err := flatten.Flatten(nested, "", flatten.DotStyle)
-	if err != nil {
-		return nil, err
+
+	var finalRows [][]types.Datum
+	wg := sync.WaitGroup{}
+	ch := make(chan result, len(rows))
+	for _, row := range rows {
+		typ := row.GetString(0)
+		name := row.GetString(1)
+		address := row.GetString(2)
+		statusAddr := row.GetString(3)
+		if len(statusAddr) == 0 {
+			ctx.GetSessionVars().StmtCtx.AppendWarning(errors.Errorf("%s node %s(%s) does not contain status address", typ, name, address))
+			continue
+		}
+
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			var url string
+			switch typ {
+			case "pd":
+				url = fmt.Sprintf("http://%s/pd/api/v1/config", statusAddr)
+			case "tikv", "tidb":
+				url = fmt.Sprintf("http://%s/config", statusAddr)
+			default:
+				ch <- result{err: errors.Errorf("unknown node: %s(%s)", typ, address)}
+				return
+			}
+			resp, err := http.Get(url)
+			if err != nil {
+				ch <- result{err: err}
+				return
+			}
+			defer resp.Body.Close()
+
+			var nested map[string]interface{}
+			if err = json.NewDecoder(resp.Body).Decode(&nested); err != nil {
+				ch <- result{err: err}
+				return
+			}
+			data, err := flatten.Flatten(nested, "", flatten.DotStyle)
+			if err != nil {
+				ch <- result{err: err}
+				return
+			}
+			var rows [][]types.Datum
+			for key, val := range data {
+				rows = append(rows, types.MakeDatums(
+					typ,
+					name,
+					address,
+					key,
+					fmt.Sprintf("%v", val),
+				))
+			}
+			ch <- result{rows: rows}
+		}()
 	}
-	var rows [][]types.Datum
-	instance := types.NewStringDatum("127.0.0.1:49904")
-	serverTp := types.NewStringDatum("TiKV")
-	for key, val := range data {
-		rows = append(rows, []types.Datum{
-			serverTp,
-			instance,
-			types.NewStringDatum(key),
-			types.NewStringDatum(fmt.Sprintf("%v", val)),
-		})
+
+	wg.Wait()
+	close(ch)
+	for result := range ch {
+		if result.err != nil {
+			ctx.GetSessionVars().StmtCtx.AppendWarning(err)
+			continue
+		}
+		finalRows = append(finalRows, result.rows...)
 	}
-	return rows, nil
+	return finalRows, nil
 }
 
 var tableNameToColumns = map[string][]columnInfo{
@@ -2133,7 +2185,7 @@ func (it *infoschemaTable) getRows(ctx sessionctx.Context, cols []*table.Column)
 	case tableTiDBClusterInfo:
 		fullRows, err = dataForTiDBClusterInfo(ctx)
 	case tableTiDBClusterConfig:
-		fullRows, err = dataForClusterConfig()
+		fullRows, err = dataForClusterConfig(ctx)
 	}
 	if err != nil {
 		return nil, err

@@ -110,7 +110,7 @@ func (vt *perfSchemaTable) getRows(ctx sessionctx.Context, cols []*table.Column)
 	case tableNameGoroutines:
 		fullRows, err = goroutinesList()
 	case tableNameTiKVCpuProfile:
-		fullRows, err = tikvCpuProfileGraph()
+		fullRows, err = tikvCpuProfileGraph(ctx)
 	}
 	if err != nil {
 		return

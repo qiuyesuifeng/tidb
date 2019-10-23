@@ -21,6 +21,7 @@ import (
 	"runtime/pprof"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/pprof/graph"
@@ -28,7 +29,9 @@ import (
 	"github.com/google/pprof/profile"
 	"github.com/google/pprof/report"
 	"github.com/pingcap/errors"
+	"github.com/pingcap/tidb/sessionctx"
 	"github.com/pingcap/tidb/types"
+	"github.com/pingcap/tidb/util/sqlexec"
 )
 
 type Node struct {
@@ -200,13 +203,59 @@ func cpuProfileGraph() ([][]types.Datum, error) {
 }
 
 // TODO: use cluster info to get all tikv profile
-func tikvCpuProfileGraph() ([][]types.Datum, error) {
-	resp, err := http.Get("http://127.0.0.1:49904/pprof/cpu?seconds=20")
+func tikvCpuProfileGraph(ctx sessionctx.Context) ([][]types.Datum, error) {
+	sql := "SELECT name, address, status_address FROM INFORMATION_SCHEMA.TIDB_CLUSTER_INFO WHERE type='tikv'"
+	rows, _, err := ctx.(sqlexec.RestrictedSQLExecutor).ExecRestrictedSQL(sql)
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
-	return profileReaderToDatums(resp.Body)
+
+	type result struct{rows [][]types.Datum; err error}
+
+	var finalRows [][]types.Datum
+	wg := sync.WaitGroup{}
+	ch := make(chan result, len(rows))
+	for _, row := range rows {
+		name := row.GetString(0)
+		address := row.GetString(1)
+		statusAddr := row.GetString(2)
+		if len(statusAddr) == 0 {
+			ctx.GetSessionVars().StmtCtx.AppendWarning(errors.Errorf("tikv node %s(%s) does not contain status address", name, address))
+			continue
+		}
+
+		wg.Add(1)
+		go func ()  {
+			defer wg.Done()
+				resp, err := http.Get(fmt.Sprintf("http://%s/pprof/cpu?seconds=20", statusAddr))
+			if err != nil {
+				ch <- result{err: err}
+				return 
+			}
+			defer resp.Body.Close()
+			rows, err := profileReaderToDatums(resp.Body)
+			if err != nil {
+				ch <- result{err: err}
+				return
+			}
+			// add extra info
+			for i := range rows {
+				rows[i] = append(types.MakeDatums(name, address), rows[i]...)
+			}
+			ch <- result{rows: rows}
+		}()
+	}
+
+	wg.Wait()
+	close(ch)
+	for result := range ch {
+		if result.err != nil {
+			ctx.GetSessionVars().StmtCtx.AppendWarning(err)
+			continue
+		}
+		finalRows = append(finalRows, result.rows...)
+	}
+	return finalRows, nil
 }
 
 func profileGraph(name string) ([][]types.Datum, error) {
