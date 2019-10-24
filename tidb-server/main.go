@@ -85,6 +85,7 @@ const (
 	nmStatusPort       = "status"
 	nmMetricsAddr      = "metrics-addr"
 	nmMetricsInterval  = "metrics-interval"
+	nmPrometheusAddr   = "prometheus-addr"
 	nmDdlLease         = "lease"
 	nmTokenLimit       = "token-limit"
 	nmPluginDir        = "plugin-dir"
@@ -128,6 +129,8 @@ var (
 	statusPort      = flag.String(nmStatusPort, "10080", "tidb server status port")
 	metricsAddr     = flag.String(nmMetricsAddr, "", "prometheus pushgateway address, leaves it empty will disable prometheus push.")
 	metricsInterval = flag.Uint(nmMetricsInterval, 15, "prometheus client push interval in second, set \"0\" to disable prometheus push.")
+
+	prometheusAddr = flag.String(nmPrometheusAddr, "", "prometheus server address.")
 
 	// PROXY Protocol
 	proxyProtocolNetworks      = flag.String(nmProxyProtocolNetworks, "", "proxy protocol networks allowed IP or *, empty mean disable proxy protocol support")
@@ -468,6 +471,10 @@ func overrideConfig() {
 	}
 	if actualFlags[nmMetricsInterval] {
 		cfg.Status.MetricsInterval = *metricsInterval
+	}
+
+	if actualFlags[nmPrometheusAddr] {
+		cfg.PrometheusAddr = *prometheusAddr
 	}
 
 	// PROXY Protocol

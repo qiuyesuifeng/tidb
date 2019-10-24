@@ -51,6 +51,9 @@ const tableTiDBClusterInfo = `CREATE TABLE %s.TIDB_CLUSTER_INFO (
 const tableSystemInfo = `CREATE TABLE %s.SYSTEM_INFO (
   ID bigint(21) unsigned DEFAULT NULL,
   IP varchar(64) DEFAULT NULL,
+  Name varchar(64) DEFAULT NULL,
+  Type varchar(64) DEFAULT NULL,
+  STATUS_ADDRESS varchar(64) DEFAULT NULL,
   CPU varchar(64) DEFAULT NULL,
   CPU_USAGE double DEFAULT NULL,
   MEMORY varchar(64) DEFAULT NULL,

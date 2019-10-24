@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -37,6 +38,7 @@ import (
 	"github.com/pingcap/tidb/table"
 	"github.com/pingcap/tidb/types"
 	binaryJson "github.com/pingcap/tidb/types/json"
+	"github.com/pingcap/tidb/util"
 	"github.com/pingcap/tidb/util/pdapi"
 	"github.com/pingcap/tidb/util/set"
 	"github.com/pingcap/tidb/util/sqlexec"
@@ -84,6 +86,7 @@ const (
 	tableTiKVRegionStatus                   = "TIKV_REGION_STATUS"
 	tableTiKVRegionPeers                    = "TIKV_REGION_PEERS"
 	tableTiDBServersInfo                    = "TIDB_SERVERS_INFO"
+	tableTiDBClusterInfo                    = "TIDB_CLUSTER_INFO"
 )
 
 type columnInfo struct {
@@ -655,6 +658,16 @@ var tableTiDBServersInfoCols = []columnInfo{
 	{"PORT", mysql.TypeLonglong, 21, 0, nil, nil},
 	{"STATUS_PORT", mysql.TypeLonglong, 21, 0, nil, nil},
 	{"LEASE", mysql.TypeVarchar, 64, 0, nil, nil},
+	{"VERSION", mysql.TypeVarchar, 64, 0, nil, nil},
+	{"GIT_HASH", mysql.TypeVarchar, 64, 0, nil, nil},
+}
+
+var tableTiDBClusterInfoCols = []columnInfo{
+	{"ID", mysql.TypeLonglong, 21, 0, nil, nil},
+	{"TYPE", mysql.TypeVarchar, 64, 0, nil, nil},
+	{"NAME", mysql.TypeVarchar, 64, 0, nil, nil},
+	{"ADDRESS", mysql.TypeVarchar, 64, 0, nil, nil},
+	{"STATUS_ADDRESS", mysql.TypeVarchar, 64, 0, nil, nil},
 	{"VERSION", mysql.TypeVarchar, 64, 0, nil, nil},
 	{"GIT_HASH", mysql.TypeVarchar, 64, 0, nil, nil},
 }
@@ -1816,6 +1829,120 @@ func dataForServersInfo() ([][]types.Datum, error) {
 	return rows, nil
 }
 
+func dataForTiDBClusterInfo(ctx sessionctx.Context) ([][]types.Datum, error) {
+	// get tidb servers info.
+	tidbItems, err := infosync.GetAllServerInfo(context.Background())
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	rows := make([][]types.Datum, 0, len(tidbItems))
+
+	idx := 0
+	for _, item := range tidbItems {
+		tp := "tidb"
+		name := fmt.Sprintf("tidb-%d", idx)
+		tidbAddr := fmt.Sprintf("%s:%d", item.IP, item.Port)
+		tidbStatusAddr := fmt.Sprintf("%s:%d", item.IP, item.StatusPort)
+
+		row := types.MakeDatums(
+			idx,
+			tp,
+			name,
+			tidbAddr,
+			tidbStatusAddr,
+			item.Version,
+			item.GitHash,
+		)
+
+		rows = append(rows, row)
+		idx++
+	}
+
+	// get tidb servers info.
+	tikvStore, ok := ctx.GetStore().(tikv.Storage)
+	if !ok {
+		return nil, errors.New("Information about TiKV store status can be gotten only when the storage is TiKV")
+	}
+	tikvHelper := &helper.Helper{
+		Store:       tikvStore,
+		RegionCache: tikvStore.GetRegionCache(),
+	}
+
+	pdHosts, err := tikvHelper.GetPDAddrs()
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	for i, host := range pdHosts {
+		host = strings.TrimSpace(host)
+
+		// get pd version
+		url := fmt.Sprintf("http://%s/pd/api/v1/config/cluster-version", host)
+		d, err := util.Get(url).Bytes()
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+
+		version := strings.Trim(strings.Trim(string(d), "\n"), "\"")
+
+		// get pd git_hash
+		url = fmt.Sprintf("http://%s/pd/api/v1/status", host)
+		dd, err := util.Get(url).Bytes()
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+
+		m := make(map[string]interface{})
+		err = json.Unmarshal(dd, &m)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+
+		githash := m["git_hash"]
+
+		tp := "pd"
+		name := fmt.Sprintf("pd-%d", i)
+
+		row := types.MakeDatums(
+			idx,
+			tp,
+			name,
+			host,
+			host,
+			version,
+			githash,
+		)
+
+		rows = append(rows, row)
+		idx++
+	}
+
+	// get tikv servers info.
+	storesStat, err := tikvHelper.GetStoresStat()
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	for i, storeStat := range storesStat.Stores {
+		tp := "tikv"
+		name := fmt.Sprintf("tikv-%d", i)
+
+		row := types.MakeDatums(
+			idx,
+			tp,
+			name,
+			storeStat.Store.Address,
+			storeStat.Store.StatusAddress,
+			storeStat.Store.Version,
+			storeStat.Store.GitHash,
+		)
+
+		rows = append(rows, row)
+		idx++
+	}
+
+	return rows, nil
+}
+
 var tableNameToColumns = map[string][]columnInfo{
 	tableSchemata:                           schemataCols,
 	tableTables:                             tablesCols,
@@ -1857,6 +1984,7 @@ var tableNameToColumns = map[string][]columnInfo{
 	tableTiKVRegionStatus:                   tableTiKVRegionStatusCols,
 	tableTiKVRegionPeers:                    tableTiKVRegionPeersCols,
 	tableTiDBServersInfo:                    tableTiDBServersInfoCols,
+	tableTiDBClusterInfo:                    tableTiDBClusterInfoCols,
 }
 
 func createInfoSchemaTable(handle *Handle, meta *model.TableInfo) *infoschemaTable {
@@ -1962,6 +2090,8 @@ func (it *infoschemaTable) getRows(ctx sessionctx.Context, cols []*table.Column)
 		fullRows, err = dataForTikVRegionPeers(ctx)
 	case tableTiDBServersInfo:
 		fullRows, err = dataForServersInfo()
+	case tableTiDBClusterInfo:
+		fullRows, err = dataForTiDBClusterInfo(ctx)
 	}
 	if err != nil {
 		return nil, err

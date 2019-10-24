@@ -26,7 +26,16 @@ func NewInspectionHelper(ctx sessionctx.Context) *InspectionHelper {
 		p:          parser.New(),
 		dbName:     fmt.Sprintf("%s_%s", "TIDB_INSPECTION", time.Now().Format("20060102150405")),
 		tableNames: []string{},
+		items:      []ClusterItem{},
 	}
+}
+
+type ClusterItem struct {
+	ID      int64
+	IP      string
+	Name    string
+	Address string
+	Type    string
 }
 
 type InspectionHelper struct {
@@ -34,6 +43,13 @@ type InspectionHelper struct {
 	p          *parser.Parser
 	dbName     string
 	tableNames []string
+
+	items  []ClusterItem
+	isInit bool
+}
+
+func getIPfromAdress(address string) string {
+	return strings.Split(address, ":")[0]
 }
 
 func (i *InspectionHelper) GetDBName() string {
@@ -115,16 +131,21 @@ func (i *InspectionHelper) GetClusterInfo() error {
 
 	idx := 0
 	for _, item := range tidbItems {
+		tp := "tidb"
+		name := fmt.Sprintf("tidb-%d", idx)
+		tidbAddr := fmt.Sprintf("%s:%d", item.IP, item.Port)
 		tidbStatusAddr := fmt.Sprintf("%s:%d", item.IP, item.StatusPort)
 		tidbConfig := fmt.Sprintf("http://%s/config", tidbStatusAddr)
-		sql := fmt.Sprintf(`insert into %s.TIDB_CLUSTER_INFO values (%d, "tidb", "tidb-%d", "%s:%d", "%s", "%s", "%s", "%s");`,
-			i.dbName, idx, idx, item.IP, item.Port, tidbStatusAddr, item.Version, item.GitHash, tidbConfig)
+
+		sql := fmt.Sprintf(`insert into %s.TIDB_CLUSTER_INFO values (%d, "%s", "%s", "%s", "%s", "%s", "%s", "%s");`,
+			i.dbName, idx, tp, name, tidbAddr, tidbStatusAddr, item.Version, item.GitHash, tidbConfig)
 
 		_, _, err := i.ctx.(sqlexec.RestrictedSQLExecutor).ExecRestrictedSQL(sql)
 		if err != nil {
 			return errors.Trace(err)
 		}
 
+		i.items = append(i.items, ClusterItem{int64(idx), getIPfromAdress(tidbStatusAddr), name, tidbStatusAddr, "tidb"})
 		idx++
 	}
 
@@ -171,14 +192,18 @@ func (i *InspectionHelper) GetClusterInfo() error {
 		}
 
 		githash := m["git_hash"]
-		sql := fmt.Sprintf(`insert into %s.TIDB_CLUSTER_INFO values (%d, "pd", "pd-%d", "%s","%s", "%s", "%s","%s");`,
-			i.dbName, idx, ii, host, host, version, githash, config)
+
+		tp := "pd"
+		name := fmt.Sprintf("pd-%d", ii)
+		sql := fmt.Sprintf(`insert into %s.TIDB_CLUSTER_INFO values (%d, "%s", "%s", "%s","%s", "%s", "%s","%s");`,
+			i.dbName, idx, tp, name, host, host, version, githash, config)
 
 		_, _, err = i.ctx.(sqlexec.RestrictedSQLExecutor).ExecRestrictedSQL(sql)
 		if err != nil {
 			return errors.Trace(err)
 		}
 
+		i.items = append(i.items, ClusterItem{int64(idx), getIPfromAdress(host), name, host, tp})
 		idx++
 	}
 
@@ -188,16 +213,33 @@ func (i *InspectionHelper) GetClusterInfo() error {
 		return errors.Trace(err)
 	}
 	for ii, storeStat := range storesStat.Stores {
+		tp := "tikv"
+		name := fmt.Sprintf("tikv-%d", ii)
 		tikvConfig := fmt.Sprintf("http://%s/config", storeStat.Store.StatusAddress)
-		sql := fmt.Sprintf(`insert into %s.TIDB_CLUSTER_INFO values (%d, "tikv", "tikv-%d", "%s", "%s", "%s", "%s", "%s");`,
-			i.dbName, idx, ii, storeStat.Store.Address, storeStat.Store.StatusAddress, storeStat.Store.Version, storeStat.Store.GitHash, tikvConfig)
+
+		sql := fmt.Sprintf(`insert into %s.TIDB_CLUSTER_INFO values (%d, "%s", "%s", "%s", "%s", "%s", "%s", "%s");`,
+			i.dbName, idx, tp, name, storeStat.Store.Address, storeStat.Store.StatusAddress, storeStat.Store.Version, storeStat.Store.GitHash, tikvConfig)
 
 		_, _, err := i.ctx.(sqlexec.RestrictedSQLExecutor).ExecRestrictedSQL(sql)
 		if err != nil {
 			return errors.Trace(err)
 		}
 
+		i.items = append(i.items, ClusterItem{int64(idx), getIPfromAdress(storeStat.Store.StatusAddress), name, storeStat.Store.StatusAddress, tp})
 		idx++
+	}
+
+	i.isInit = true
+	return nil
+}
+
+func (i *InspectionHelper) getSystemInfo(item ClusterItem) error {
+	return nil
+}
+
+func (i *InspectionHelper) GetSystemInfo() error {
+	if !i.isInit {
+		return errors.New("InspectionHelper is not init.")
 	}
 
 	return nil
