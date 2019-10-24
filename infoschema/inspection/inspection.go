@@ -114,9 +114,11 @@ func (i *InspectionHelper) GetClusterInfo() error {
 	}
 
 	idx := 0
-	for ii, item := range tidbItems {
-		sql := fmt.Sprintf(`insert into %s.TIDB_CLUSTER_INFO values (%d, "tidb", "tidb-%d", "%s:%d", "%s", "%s","");`,
-			i.dbName, idx, ii, item.IP, item.Port, item.Version, item.GitHash)
+	for _, item := range tidbItems {
+		tidbStatusAddr := fmt.Sprintf("%s:%d", item.IP, item.StatusPort)
+		tidbConfig := fmt.Sprintf("http://%s/config", tidbStatusAddr)
+		sql := fmt.Sprintf(`insert into %s.TIDB_CLUSTER_INFO values (%d, "tidb", "tidb-%d", "%s:%d", "%s", "%s", "%s", "%s");`,
+			i.dbName, idx, idx, item.IP, item.Port, tidbStatusAddr, item.Version, item.GitHash, tidbConfig)
 
 		_, _, err := i.ctx.(sqlexec.RestrictedSQLExecutor).ExecRestrictedSQL(sql)
 		if err != nil {
@@ -169,8 +171,8 @@ func (i *InspectionHelper) GetClusterInfo() error {
 		}
 
 		githash := m["git_hash"]
-		sql := fmt.Sprintf(`insert into %s.TIDB_CLUSTER_INFO values (%d, "pd", "pd-%d", "%s", "%s", "%s","%s");`,
-			i.dbName, idx, ii, host, version, githash, config)
+		sql := fmt.Sprintf(`insert into %s.TIDB_CLUSTER_INFO values (%d, "pd", "pd-%d", "%s","%s", "%s", "%s","%s");`,
+			i.dbName, idx, ii, host, host, version, githash, config)
 
 		_, _, err = i.ctx.(sqlexec.RestrictedSQLExecutor).ExecRestrictedSQL(sql)
 		if err != nil {
@@ -186,8 +188,9 @@ func (i *InspectionHelper) GetClusterInfo() error {
 		return errors.Trace(err)
 	}
 	for ii, storeStat := range storesStat.Stores {
-		sql := fmt.Sprintf(`insert into %s.TIDB_CLUSTER_INFO values (%d, "tikv", "tikv-%d", "%s", "%s", "%s","");`,
-			i.dbName, idx, ii, storeStat.Store.Address, storeStat.Store.Version, "")
+		tikvConfig := fmt.Sprintf("http://%s/config", storeStat.Store.StatusAddress)
+		sql := fmt.Sprintf(`insert into %s.TIDB_CLUSTER_INFO values (%d, "tikv", "tikv-%d", "%s", "%s", "%s", "%s", "%s");`,
+			i.dbName, idx, ii, storeStat.Store.Address, storeStat.Store.StatusAddress, storeStat.Store.Version, storeStat.Store.GitHash, tikvConfig)
 
 		_, _, err := i.ctx.(sqlexec.RestrictedSQLExecutor).ExecRestrictedSQL(sql)
 		if err != nil {

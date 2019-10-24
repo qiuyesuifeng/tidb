@@ -88,6 +88,9 @@ func (s *Server) startHTTPServer() {
 	router.Handle("/ddl/history", ddlHistoryJobHandler{tikvHandlerTool}).Name("DDL_History")
 	router.Handle("/ddl/owner/resign", ddlResignOwnerHandler{tikvHandlerTool.Store.(kv.Storage)}).Name("DDL_Owner_Resign")
 
+	//
+	router.Handle("/config", serverConfigHandler{}).Name("Config")
+
 	// HTTP path for get server info.
 	router.Handle("/info", serverInfoHandler{tikvHandlerTool}).Name("Info")
 	router.Handle("/info/all", allServerInfoHandler{tikvHandlerTool}).Name("InfoALL")

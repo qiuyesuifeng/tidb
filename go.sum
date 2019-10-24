@@ -125,6 +125,8 @@ github.com/kr/pty v1.0.0/go.mod h1:pFQYn66WHrOpPYNljwOMqo10TkYh1fy3cYio2l3bCsQ=
 github.com/kr/pty v1.1.1/go.mod h1:pFQYn66WHrOpPYNljwOMqo10TkYh1fy3cYio2l3bCsQ=
 github.com/kr/text v0.1.0 h1:45sCR5RtlFHMR4UwH9sdQ5TC8v0qDQCHnXt+kaKSTVE=
 github.com/kr/text v0.1.0/go.mod h1:4Jbv+DJW3UT/LiOwJeYQe1efqtUx/iVham/4vfdArNI=
+github.com/lonng/kvproto v0.0.0-20191021150746-701437d057b3 h1:DKJ+AGeFA7VW55+qfOsfew1Z5TBZpQ+5jrCCv1pVyWQ=
+github.com/lonng/kvproto v0.0.0-20191021150746-701437d057b3/go.mod h1:WWLmULLO7l8IOcQG+t+ItJ3fEcrL5FxF0Wu+HrMy26w=
 github.com/lonng/pprof v0.0.0-20191012154247-04dfd648ce8d h1:6Ike9EBxOFsCMMih14rQJmb7WPWdgRu4C0OLl6oRHwE=
 github.com/lonng/pprof v0.0.0-20191012154247-04dfd648ce8d/go.mod h1:0vjxLpmyJvBwQbIQuxhHxmogQFpJvB9doVHvxFFfyoY=
 github.com/mattn/go-colorable v0.0.9/go.mod h1:9vuHe8Xs5qXnSaW/c/ABM9alt+Vo+STaOChaDxuIBZU=
@@ -224,8 +226,6 @@ github.com/spaolacci/murmur3 v0.0.0-20180118202830-f09979ecbc72/go.mod h1:JwIasO
 github.com/spf13/cobra v0.0.3/go.mod h1:1l0Ry5zgKvJasoi3XT1TypsSe7PqH0Sj9dhYf7v3XqQ=
 github.com/spf13/pflag v1.0.1 h1:aCvUg6QPl3ibpQUxyLkrEkCHtPqYJL4x9AuhqVqFis4=
 github.com/spf13/pflag v1.0.1/go.mod h1:DYY7MBk1bdzusC3SYhjObp+wFpr4gzcvqqNjLnInEg4=
-github.com/spongedu/parser v0.0.0-20191020022001-78cb2e5f6237 h1:pa5KLsJLwIelBlqKvbHFswf63MWc9Ilzq5kvoddNISU=
-github.com/spongedu/parser v0.0.0-20191020022001-78cb2e5f6237/go.mod h1:pt5ToBPRXvy7eNveA9VEwpNj5AQiVGE4GaPxBeAmeUo=
 github.com/stretchr/objx v0.1.0/go.mod h1:HFkY916IF+rwdDfMAkV7OtwuqBVzrE8GR6GFx+wExME=
 github.com/stretchr/objx v0.1.1/go.mod h1:HFkY916IF+rwdDfMAkV7OtwuqBVzrE8GR6GFx+wExME=
 github.com/stretchr/testify v1.2.2/go.mod h1:a8OnRcib4nhh0OaRAV+Yts87kKdq0PP7pXfy6kDkUVs=

@@ -84,4 +84,6 @@ replace github.com/pingcap/parser => github.com/qiuyesuifeng/parser v0.0.0-20191
 
 replace github.com/google/pprof => github.com/lonng/pprof v0.0.0-20191012154247-04dfd648ce8d
 
+replace github.com/pingcap/kvproto v0.0.0-20190910074005-0e61b6f435c1 => github.com/lonng/kvproto v0.0.0-20191021150746-701437d057b3
+
 go 1.13
