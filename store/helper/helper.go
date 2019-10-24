@@ -700,3 +700,14 @@ func (h *Helper) GetStoresStat() (*StoresStat, error) {
 	}
 	return &storesStat, nil
 }
+
+// GetPDAddrs gets the PD address information.
+func (h *Helper) GetPDAddrs() ([]string, error) {
+	etcd, ok := h.Store.(tikv.EtcdBackend)
+	if !ok {
+		return nil, errors.WithStack(errors.New("not implemented"))
+	}
+
+	pdHosts := etcd.EtcdAddrs()
+	return pdHosts, nil
+}

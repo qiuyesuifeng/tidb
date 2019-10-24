@@ -1,7 +1,10 @@
 package inspection
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/pingcap/errors"
@@ -9,33 +12,36 @@ import (
 	"github.com/pingcap/parser/ast"
 	"github.com/pingcap/parser/model"
 	"github.com/pingcap/tidb/domain"
-	"github.com/pingcap/tidb/util/sqlexec"
-	// "github.com/pingcap/parser/mysql"
-	// "github.com/pingcap/tidb/ddl"
-	// "github.com/pingcap/tidb/infoschema"
-	// "github.com/pingcap/tidb/kv"
-	// "github.com/pingcap/tidb/meta/autoid"
+	"github.com/pingcap/tidb/domain/infosync"
 	"github.com/pingcap/tidb/sessionctx"
-	// "github.com/pingcap/tidb/table"
-	// "github.com/pingcap/tidb/types"
+	"github.com/pingcap/tidb/store/helper"
+	"github.com/pingcap/tidb/store/tikv"
+	"github.com/pingcap/tidb/util"
+	"github.com/pingcap/tidb/util/sqlexec"
 )
 
 func NewInspectionHelper(ctx sessionctx.Context) *InspectionHelper {
 	return &InspectionHelper{
-		ctx:    ctx,
-		p:      parser.New(),
-		dbName: fmt.Sprintf("%s_%s", "tidb_inspection", time.Now().Format("20060102150405")),
+		ctx:        ctx,
+		p:          parser.New(),
+		dbName:     fmt.Sprintf("%s_%s", "TIDB_INSPECTION", time.Now().Format("20060102150405")),
+		tableNames: []string{},
 	}
 }
 
 type InspectionHelper struct {
-	ctx    sessionctx.Context
-	p      *parser.Parser
-	dbName string
+	ctx        sessionctx.Context
+	p          *parser.Parser
+	dbName     string
+	tableNames []string
 }
 
 func (i *InspectionHelper) GetDBName() string {
 	return i.dbName
+}
+
+func (i *InspectionHelper) GetTableNames() []string {
+	return i.tableNames
 }
 
 func (i *InspectionHelper) CreateInspectionDB() error {
@@ -59,10 +65,13 @@ func (i *InspectionHelper) CreateInspectionTables() error {
 		if !ok {
 			return errors.New(fmt.Sprintf("Fail to create inspection table. Maybe create table statment is illegal: %s", sql))
 		}
+
 		s.Table.TableInfo = &model.TableInfo{IsInspection: true, InspectionInfo: make(map[string]string)}
 		if err := domain.GetDomain(i.ctx).DDL().CreateTable(i.ctx, s); err != nil {
 			return errors.Trace(err)
 		}
+
+		i.tableNames = append(i.tableNames, s.Table.Name.O)
 	}
 
 	for _, template := range inspectionPersistTables {
@@ -80,6 +89,8 @@ func (i *InspectionHelper) CreateInspectionTables() error {
 		if err := domain.GetDomain(i.ctx).DDL().CreateTable(i.ctx, s); err != nil {
 			return errors.Trace(err)
 		}
+
+		i.tableNames = append(i.tableNames, s.Table.Name.O)
 	}
 
 	return nil
@@ -95,107 +106,96 @@ func (i *InspectionHelper) TestWriteTable() error {
 	return nil
 }
 
-/*
-func tableFromMeta(alloc autoid.Allocator, meta *model.TableInfo) (table.Table, error) {
-	return createInspectionTable(meta), nil
-}
-
-// createPerfSchemaTable creates all perfSchemaTables
-func createInspectionTable(meta *model.TableInfo) *inspectTable {
-	columns := make([]*table.Column, 0, len(meta.Columns))
-	for _, colInfo := range meta.Columns {
-		col := table.ToColumn(colInfo)
-		columns = append(columns, col)
-	}
-	t := &inspectTable{
-		meta: meta,
-		cols: columns,
-	}
-	return t
-}
-
-// inspectTable stands for the fake table all its data is in the memory.
-type inspectTable struct {
-	infoschema.VirtualTable
-	meta *model.TableInfo
-	cols []*table.Column
-}
-
-// Cols implements table.Table Type interface.
-func (vt *inspectTable) Cols() []*table.Column {
-	return vt.cols
-}
-
-// WritableCols implements table.Table Type interface.
-func (vt *inspectTable) WritableCols() []*table.Column {
-	return vt.cols
-}
-
-// GetID implements table.Table GetID interface.
-func (vt *inspectTable) GetPhysicalID() int64 {
-	return vt.meta.ID
-}
-
-// Meta implements table.Table Type interface.
-func (vt *inspectTable) Meta() *model.TableInfo {
-	return vt.meta
-}
-
-func (vt *inspectTable) getRows(ctx sessionctx.Context, cols []*table.Column) (fullRows [][]types.Datum, err error) {
-	// switch vt.meta.Name.O {
-	// case tableNameEventsStatementsSummaryByDigest:
-	// 	fullRows = stmtsummary.StmtSummaryByDigestMap.ToDatum()
-	// case tableNameCpuProfile:
-	// 	fullRows, err = cpuProfileGraph()
-	// case tableNameMemoryProfile:
-	// 	fullRows, err = profileGraph("heap")
-	// case tableNameMutexProfile:
-	// 	fullRows, err = profileGraph("mutex")
-	// case tableNameAllocsProfile:
-	// 	fullRows, err = profileGraph("allocs")
-	// case tableNameBlockProfile:
-	// 	fullRows, err = profileGraph("block")
-	// case tableNameGoroutines:
-	// 	fullRows, err = goroutinesList()
-	// }
-	// if err != nil {
-	// 	return
-	// }
-	// if len(cols) == len(vt.cols) {
-	// 	return
-	// }
-
-	rows := make([][]types.Datum, len(fullRows))
-	for i, fullRow := range fullRows {
-		row := make([]types.Datum, len(cols))
-		for j, col := range cols {
-			row[j] = fullRow[col.Offset]
-		}
-		rows[i] = row
-	}
-	return rows, nil
-}
-
-// IterRecords implements table.Table IterRecords interface.
-func (vt *inspectTable) IterRecords(ctx sessionctx.Context, startKey kv.Key, cols []*table.Column,
-	fn table.RecordIterFunc) error {
-	if len(startKey) != 0 {
-		return table.ErrUnsupportedOp
-	}
-	rows, err := vt.getRows(ctx, cols)
+func (i *InspectionHelper) GetClusterInfo() error {
+	// get tidb servers info.
+	tidbItems, err := infosync.GetAllServerInfo(context.Background())
 	if err != nil {
-		return err
+		return errors.Trace(err)
 	}
-	for i, row := range rows {
-		more, err := fn(int64(i), row, cols)
+
+	idx := 0
+	for ii, item := range tidbItems {
+		sql := fmt.Sprintf(`insert into %s.TIDB_CLUSTER_INFO values (%d, "tidb", "tidb-%d", "%s:%d", "%s", "%s","");`,
+			i.dbName, idx, ii, item.IP, item.Port, item.Version, item.GitHash)
+
+		_, _, err := i.ctx.(sqlexec.RestrictedSQLExecutor).ExecRestrictedSQL(sql)
 		if err != nil {
-			return err
+			return errors.Trace(err)
 		}
-		if !more {
-			break
-		}
+
+		idx++
 	}
+
+	// get pd servers info.
+	tikvStore, ok := i.ctx.GetStore().(tikv.Storage)
+	if !ok {
+		return errors.New("Information about TiKV store status can be gotten only when the storage is TiKV")
+	}
+	tikvHelper := &helper.Helper{
+		Store:       tikvStore,
+		RegionCache: tikvStore.GetRegionCache(),
+	}
+
+	pdHosts, err := tikvHelper.GetPDAddrs()
+	if err != nil {
+		return errors.Trace(err)
+	}
+	for ii, host := range pdHosts {
+		host = strings.TrimSpace(host)
+
+		// get pd config
+		config := fmt.Sprintf("http://%s/pd/api/v1/config", host)
+
+		// get pd version
+		url := fmt.Sprintf("http://%s/pd/api/v1/config/cluster-version", host)
+		d, err := util.Get(url).Bytes()
+		if err != nil {
+			return errors.Trace(err)
+		}
+
+		version := strings.Trim(strings.Trim(string(d), "\n"), "\"")
+
+		// get pd git_hash
+		url = fmt.Sprintf("http://%s/pd/api/v1/status", host)
+		dd, err := util.Get(url).Bytes()
+		if err != nil {
+			return errors.Trace(err)
+		}
+
+		m := make(map[string]interface{})
+		err = json.Unmarshal(dd, &m)
+		if err != nil {
+			return errors.Trace(err)
+		}
+
+		githash := m["git_hash"]
+		sql := fmt.Sprintf(`insert into %s.TIDB_CLUSTER_INFO values (%d, "pd", "pd-%d", "%s", "%s", "%s","%s");`,
+			i.dbName, idx, ii, host, version, githash, config)
+
+		_, _, err = i.ctx.(sqlexec.RestrictedSQLExecutor).ExecRestrictedSQL(sql)
+		if err != nil {
+			return errors.Trace(err)
+		}
+
+		idx++
+	}
+
+	// get tikv servers info.
+	storesStat, err := tikvHelper.GetStoresStat()
+	if err != nil {
+		return errors.Trace(err)
+	}
+	for ii, storeStat := range storesStat.Stores {
+		sql := fmt.Sprintf(`insert into %s.TIDB_CLUSTER_INFO values (%d, "tikv", "tikv-%d", "%s", "%s", "%s","");`,
+			i.dbName, idx, ii, storeStat.Store.Address, storeStat.Store.Version, "")
+
+		_, _, err := i.ctx.(sqlexec.RestrictedSQLExecutor).ExecRestrictedSQL(sql)
+		if err != nil {
+			return errors.Trace(err)
+		}
+
+		idx++
+	}
+
 	return nil
 }
-
-*/

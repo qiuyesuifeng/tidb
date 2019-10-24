@@ -46,21 +46,20 @@ type InspectionReaderExecutor struct {
 	variableName string
 }
 
-
 // Open initialzes necessary variables for using this executor.
 func (e *InspectionReaderExecutor) Open(ctx context.Context) error {
-	 // tp, ok := e.Table.StreamProperties["type"]
-	 // if !ok {
-	 // 	return errors.New("Cannot find stream table type")
-	 // }
+	// tp, ok := e.Table.StreamProperties["type"]
+	// if !ok {
+	// 	return errors.New("Cannot find stream table type")
+	// }
 
-	 // e.tp = tp
-	 // e.setVariableName(strings.ToLower(tp))
+	// e.tp = tp
+	// e.setVariableName(strings.ToLower(tp))
 
-	 // e.topic, ok = e.Table.StreamProperties["topic"]
-	 // if !ok {
-	 // 	return errors.New("Cannot find stream table topic")
-	 // }
+	// e.topic, ok = e.Table.StreamProperties["topic"]
+	// if !ok {
+	// 	return errors.New("Cannot find stream table topic")
+	// }
 
 	//  var err error
 	//  value, err := e.ctx.GetSessionVars().GlobalVarsAccessor.GetGlobalSysVar(e.variableName)
@@ -84,49 +83,49 @@ func (e *InspectionReaderExecutor) Open(ctx context.Context) error {
 
 // Next fills data into the chunk passed by its caller.
 func (e *InspectionReaderExecutor) Next(ctx context.Context, chk *chunk.Chunk) error {
-	 // value, err := e.ctx.GetSessionVars().GlobalVarsAccessor.GetGlobalSysVar(e.variableName)
-	 // if err != nil {
-	 // 	return errors.Trace(err)
-	 // }
-	 // e.pos, err = strconv.Atoi(value)
-	 // if err != nil {
-	 // 	return errors.Trace(err)
-	 // }
-	 var err error
-	 e.pos = 0
+	// value, err := e.ctx.GetSessionVars().GlobalVarsAccessor.GetGlobalSysVar(e.variableName)
+	// if err != nil {
+	// 	return errors.Trace(err)
+	// }
+	// e.pos, err = strconv.Atoi(value)
+	// if err != nil {
+	// 	return errors.Trace(err)
+	// }
+	var err error
+	e.pos = 0
 
-	 pos := 0
-	 chk.GrowAndReset(e.maxChunkSize)
-	 if e.result == nil {
-	 	e.result = newFirstChunk(e)
-	 	pos, err = e.fetchAll(e.pos)
-	 	if err != nil {
-	 		return errors.Trace(err)
-	 	}
-	 	iter := chunk.NewIterator4Chunk(e.result)
-	 	for colIdx := 0; colIdx < e.Schema().Len(); colIdx++ {
-	 		retType := e.Schema().Columns[colIdx].RetType
-	 		if !types.IsTypeVarchar(retType.Tp) {
-	 			continue
-	 		}
-	 		for row := iter.Begin(); row != iter.End(); row = iter.Next() {
-	 			if valLen := len(row.GetString(colIdx)); retType.Flen < valLen {
-	 				retType.Flen = valLen
-	 			}
-	 		}
-	 	}
-	 }
-	 if e.cursor >= e.result.NumRows() {
-	 	return nil
-	 }
-	 numCurBatch := mathutil.Min(chk.Capacity(), e.result.NumRows()-e.cursor)
-	 chk.Append(e.result, e.cursor, e.cursor+numCurBatch)
-	 e.cursor += numCurBatch
+	pos := 0
+	chk.GrowAndReset(e.maxChunkSize)
+	if e.result == nil {
+		e.result = newFirstChunk(e)
+		pos, err = e.fetchAll(e.pos)
+		if err != nil {
+			return errors.Trace(err)
+		}
+		iter := chunk.NewIterator4Chunk(e.result)
+		for colIdx := 0; colIdx < e.Schema().Len(); colIdx++ {
+			retType := e.Schema().Columns[colIdx].RetType
+			if !types.IsTypeVarchar(retType.Tp) {
+				continue
+			}
+			for row := iter.Begin(); row != iter.End(); row = iter.Next() {
+				if valLen := len(row.GetString(colIdx)); retType.Flen < valLen {
+					retType.Flen = valLen
+				}
+			}
+		}
+	}
+	if e.cursor >= e.result.NumRows() {
+		return nil
+	}
+	numCurBatch := mathutil.Min(chk.Capacity(), e.result.NumRows()-e.cursor)
+	chk.Append(e.result, e.cursor, e.cursor+numCurBatch)
+	e.cursor += numCurBatch
 
-	 e.pos = pos
-	 err = e.ctx.GetSessionVars().GlobalVarsAccessor.SetGlobalSysVar(e.variableName, strconv.Itoa(e.pos))
-	 if err != nil {
-	 	return errors.Trace(err)
+	e.pos = pos
+	err = e.ctx.GetSessionVars().GlobalVarsAccessor.SetGlobalSysVar(e.variableName, strconv.Itoa(e.pos))
+	if err != nil {
+		return errors.Trace(err)
 	}
 
 	return nil
@@ -142,26 +141,26 @@ func (e *InspectionReaderExecutor) fetchAll(cursor int) (int, error) {
 	var err error
 	pos, err = e.fetchMockData(cursor)
 	if err != nil {
-			return 0, errors.Trace(err)
+		return 0, errors.Trace(err)
 	}
 
 	return pos, nil
 }
 
 func (e *InspectionReaderExecutor) fetchMockData(cursor int) (int, error) {
-	 var pos int
-	 for i := cursor; i < maxFetchCnt && i < cursor+batchFetchCnt; {
-	 	data, err := e.getData(mock.MockStreamJsonData[i])
-	 	if err != nil {
-	 		return 0, errors.Trace(err)
-	 	}
+	var pos int
+	for i := cursor; i < maxFetchCnt && i < cursor+batchFetchCnt; {
+		data, err := e.getData(mock.MockStreamJsonData[i])
+		if err != nil {
+			return 0, errors.Trace(err)
+		}
 
-	 	row := chunk.MutRowFromDatums(data).ToRow()
-	 	e.result.AppendRow(row)
+		row := chunk.MutRowFromDatums(data).ToRow()
+		e.result.AppendRow(row)
 
-	 	i++
+		i++
 		pos = i
-	 }
+	}
 
 	return pos, nil
 	//return 0, nil
