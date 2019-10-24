@@ -25,6 +25,7 @@ var inspectionPersistTables = []string{
 	tablePersistTest,
 	tableTiDBClusterInfo,
 	tableSystemInfo,
+	tableTiDBClusterKeyMetrcisInfo,
 	tableTiDBKeyMetrcisInfo,
 	tableTiKVKeyMetrcisInfo,
 	tableTiDBPerformanceInfo,
