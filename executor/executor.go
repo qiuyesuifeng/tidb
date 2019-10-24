@@ -1604,3 +1604,40 @@ func ResetContextOfStmt(ctx sessionctx.Context, s ast.StmtNode) (err error) {
 	}
 	return
 }
+
+type TiDBInspectionExec struct {
+	baseExecutor
+	done bool
+}
+
+// Open implements the Executor Open interface.
+func (e *TiDBInspectionExec) Open(ctx context.Context) error {
+	if err := e.baseExecutor.Open(ctx); err != nil {
+		return err
+	}
+
+	// dom := domain.GetDomain(e.ctx)
+	// e.result = dom.ShowSlowQuery(e.ShowSlow)
+	return nil
+}
+
+// Next implements the Executor Next interface.
+func (e *TiDBInspectionExec) Next(ctx context.Context, req *chunk.Chunk) error {
+	req.Reset()
+	if e.done {
+		return nil
+	}
+
+	// Step 1. Create inspection db
+	inspectionDBName := fmt.Sprintf("%s_%s", "tidb_inspection",time.Now().Format("20060102150405"))
+	err := domain.GetDomain(e.ctx).DDL().CreateSchema(e.ctx, model.NewCIStr(inspectionDBName), nil)
+	req.AppendInt64(0, 0)
+	req.AppendString(1, "create inspection database")
+	if err != nil {
+		req.AppendString(2, err.Error())
+	} else {
+		req.AppendString(2, "finished")
+	}
+	e.done = true
+	return nil
+}

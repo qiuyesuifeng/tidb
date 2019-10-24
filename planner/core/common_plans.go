@@ -52,6 +52,11 @@ type ShowSlow struct {
 	*ast.ShowSlow
 }
 
+// TiDBInspection is for tidb inspection information.
+type TiDBInspection struct {
+	baseSchemaProducer
+}
+
 // ShowDDLJobQueries is for showing DDL job queries sql.
 type ShowDDLJobQueries struct {
 	baseSchemaProducer

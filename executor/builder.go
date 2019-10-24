@@ -152,6 +152,8 @@ func (b *executorBuilder) build(p plannercore.Plan) Executor {
 		return b.buildShowDDLJobQueries(v)
 	case *plannercore.ShowSlow:
 		return b.buildShowSlow(v)
+	case *plannercore.TiDBInspection:
+		return b.buildTiDBInspection(v)
 	case *plannercore.PhysicalShow:
 		return b.buildShow(v)
 	case *plannercore.Simple:
@@ -316,6 +318,14 @@ func (b *executorBuilder) buildShowSlow(v *plannercore.ShowSlow) Executor {
 	e := &ShowSlowExec{
 		baseExecutor: newBaseExecutor(b.ctx, v.Schema(), v.ExplainID()),
 		ShowSlow:     v.ShowSlow,
+	}
+	return e
+}
+
+func (b *executorBuilder) buildTiDBInspection(v *plannercore.TiDBInspection) Executor {
+	e := &TiDBInspectionExec{
+		baseExecutor: newBaseExecutor(b.ctx, v.Schema(), v.ExplainID()),
+		done: false,
 	}
 	return e
 }
