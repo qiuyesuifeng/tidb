@@ -79,8 +79,8 @@ func (i *InspectionHelper) CreateInspectionDB() error {
 
 func (i *InspectionHelper) CreateInspectionTables() error {
 	// Create inspection tables
-	for _, template := range inspectionVirtualTables {
-		sql := fmt.Sprintf(template, i.dbName)
+	for _, tbl := range inspectionVirtualTables {
+		sql := fmt.Sprintf(tbl, i.dbName)
 		stmt, err := i.p.ParseOneStmt(sql, "", "")
 		if err != nil {
 			return errors.Trace(err)
@@ -99,18 +99,16 @@ func (i *InspectionHelper) CreateInspectionTables() error {
 		i.tableNames = append(i.tableNames, s.Table.Name.O)
 	}
 
-	for _, template := range inspectionPersistTables {
-		sql := fmt.Sprintf(template, i.dbName)
+	for _, tbl := range inspectionPersistTables {
+		sql := fmt.Sprintf(tbl, i.dbName)
 		stmt, err := i.p.ParseOneStmt(sql, "", "")
 		if err != nil {
 			return errors.Trace(err)
 		}
-
 		s, ok := stmt.(*ast.CreateTableStmt)
 		if !ok {
 			return errors.New(fmt.Sprintf("Fail to create inspection table. Maybe create table statment is illegal: %s", sql))
 		}
-		s.Table.TableInfo = &model.TableInfo{IsInspection: true, InspectionInfo: make(map[string]string)}
 		if err := domain.GetDomain(i.ctx).DDL().CreateTable(i.ctx, s); err != nil {
 			return errors.Trace(err)
 		}
@@ -125,7 +123,7 @@ func (i *InspectionHelper) TestWriteTable() error {
 	sql := fmt.Sprintf("insert into %s.test_persist values (1,1), (2,2);", i.dbName)
 	_, _, err := i.ctx.(sqlexec.RestrictedSQLExecutor).ExecRestrictedSQL(sql)
 	if err != nil {
-		return err
+		return errors.Trace(err)
 	}
 
 	return nil
@@ -154,7 +152,7 @@ func (i *InspectionHelper) GetClusterInfo() error {
 			return errors.Trace(err)
 		}
 
-		i.items = append(i.items, ClusterItem{int64(idx), tp, name, item.IP, tidbAddr})
+		i.items = append(i.items, ClusterItem{int64(idx), tp, name, item.IP, tidbStatusAddr})
 		idx++
 	}
 
@@ -234,7 +232,7 @@ func (i *InspectionHelper) GetClusterInfo() error {
 			return errors.Trace(err)
 		}
 
-		i.items = append(i.items, ClusterItem{int64(idx), tp, name, getIPfromAdress(storeStat.Store.Address), storeStat.Store.Address})
+		i.items = append(i.items, ClusterItem{int64(idx), tp, name, getIPfromAdress(storeStat.Store.StatusAddress), storeStat.Store.StatusAddress})
 		idx++
 	}
 
@@ -391,6 +389,97 @@ func (i *InspectionHelper) GetSystemInfo() error {
 			return errors.Trace(err)
 		}
 	}
+
+	return nil
+}
+
+func (i *InspectionHelper) GetTiDBClusterKeyMetricsInfo() error {
+	err := i.initProm()
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	api := v1.NewAPI(i.promClient)
+	ctx, cancel := context.WithTimeout(context.Background(), promReadTimeout)
+	defer cancel()
+
+	// get connection count.
+	tidbTotalConnectionQuery := `sum(tidb_server_connections)`
+	result, err := api.Query(ctx, tidbTotalConnectionQuery, time.Now())
+	if err != nil {
+		return errors.Trace(err)
+	}
+	tidbTotalConnection := result.(pmodel.Vector)[0].Value
+
+	// get ok/error query count.
+	tidbTotalQPSQuery := `sum(rate(tidb_server_query_total[1m])) by (result)`
+	result, err = api.Query(ctx, tidbTotalQPSQuery, time.Now())
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	tidbTotalOKQPS := getTotalQPSCount(result.(pmodel.Vector), "OK")
+	tidbTotalErrQPS := getTotalQPSCount(result.(pmodel.Vector), "Error")
+
+	// get statements count.
+	statementQuery := `sum(rate(tidb_executor_statement_total[1m])) by (type)`
+	result, err = api.Query(ctx, statementQuery, time.Now())
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	insertStatementCount := getStatementCount(result.(pmodel.Vector), "Insert")
+	updateStatementCount := getStatementCount(result.(pmodel.Vector), "Update")
+	deleteStatementCount := getStatementCount(result.(pmodel.Vector), "Delete")
+	replaceStatementCount := getStatementCount(result.(pmodel.Vector), "Replace")
+	selectStatementCount := getStatementCount(result.(pmodel.Vector), "Select")
+
+	// get query 80/90/99/999 value.
+	query80 := `histogram_quantile(0.80, sum(rate(tidb_server_handle_query_duration_seconds_bucket[1m])) by (le))`
+	result, err = api.Query(ctx, query80, time.Now())
+	if err != nil {
+		return errors.Trace(err)
+	}
+	query80Value := fmt.Sprintf("%.2fms", 1000*result.(pmodel.Vector)[0].Value)
+
+	query95 := `histogram_quantile(0.95, sum(rate(tidb_server_handle_query_duration_seconds_bucket[1m])) by (le))`
+	result, err = api.Query(ctx, query95, time.Now())
+	if err != nil {
+		return errors.Trace(err)
+	}
+	query95Value := fmt.Sprintf("%.2fms", 1000*result.(pmodel.Vector)[0].Value)
+
+	query99 := `histogram_quantile(0.99, sum(rate(tidb_server_handle_query_duration_seconds_bucket[1m])) by (le))`
+	result, err = api.Query(ctx, query99, time.Now())
+	if err != nil {
+		return errors.Trace(err)
+	}
+	query99Value := fmt.Sprintf("%.2fms", 1000*result.(pmodel.Vector)[0].Value)
+
+	query999 := `histogram_quantile(0.999, sum(rate(tidb_server_handle_query_duration_seconds_bucket[1m])) by (le))`
+	result, err = api.Query(ctx, query999, time.Now())
+	if err != nil {
+		return errors.Trace(err)
+	}
+	query999Value := fmt.Sprintf("%.2fms", 1000*result.(pmodel.Vector)[0].Value)
+
+	clusterID := 0
+	sql := fmt.Sprintf(`insert into %s.TIDB_CLUSTER_KEY_METRICS_INFO values (%d, "%s", "%s", "%s", 
+		"%s", "%s", "%s", "%s", "%s", 
+		"%s", "%s", "%s", "%s");`,
+		i.dbName, clusterID, tidbTotalConnection, tidbTotalOKQPS, tidbTotalErrQPS,
+		insertStatementCount, updateStatementCount, deleteStatementCount, replaceStatementCount, selectStatementCount,
+		query80Value, query95Value, query99Value, query999Value)
+
+	_, _, err = i.ctx.(sqlexec.RestrictedSQLExecutor).ExecRestrictedSQL(sql)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	return nil
+}
+
+func (i *InspectionHelper) GetTiDBKeyMetricsInfo() error {
 
 	return nil
 }
