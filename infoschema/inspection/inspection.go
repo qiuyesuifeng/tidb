@@ -409,6 +409,7 @@ func (i *InspectionHelper) GetTiDBClusterKeyMetricsInfo() error {
 	if err != nil {
 		return errors.Trace(err)
 	}
+  
 	tidbTotalConnection := fmt.Sprintf("%.2f", result.(pmodel.Vector)[0].Value)
 
 	// get ok/error query count.

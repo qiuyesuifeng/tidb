@@ -17,11 +17,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/jeremywohl/flatten"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/parser/charset"
 	"github.com/pingcap/parser/model"
@@ -87,6 +89,7 @@ const (
 	tableTiKVRegionPeers                    = "TIKV_REGION_PEERS"
 	tableTiDBServersInfo                    = "TIDB_SERVERS_INFO"
 	tableTiDBClusterInfo                    = "TIDB_CLUSTER_INFO"
+	tableTiDBClusterConfig                  = "TIDB_CLUSTER_CONFIG"
 )
 
 type columnInfo struct {
@@ -670,6 +673,14 @@ var tableTiDBClusterInfoCols = []columnInfo{
 	{"STATUS_ADDRESS", mysql.TypeVarchar, 64, 0, nil, nil},
 	{"VERSION", mysql.TypeVarchar, 64, 0, nil, nil},
 	{"GIT_HASH", mysql.TypeVarchar, 64, 0, nil, nil},
+}
+
+var tableTiDBClusterConfigCols = []columnInfo{
+	{"TYPE", mysql.TypeVarchar, 64, 0, nil, nil},
+	{"NAME", mysql.TypeVarchar, 64, 0, nil, nil},
+	{"ADDRESS", mysql.TypeVarchar, 64, 0, nil, nil},
+	{"KEY", mysql.TypeVarchar, 256, 0, nil, nil},
+	{"VALUE", mysql.TypeVarchar, 128, 0, nil, nil},
 }
 
 func dataForTiKVRegionStatus(ctx sessionctx.Context) (records [][]types.Datum, err error) {
@@ -1939,8 +1950,88 @@ func dataForTiDBClusterInfo(ctx sessionctx.Context) ([][]types.Datum, error) {
 		rows = append(rows, row)
 		idx++
 	}
-
 	return rows, nil
+}
+
+func dataForClusterConfig(ctx sessionctx.Context) ([][]types.Datum, error) {
+	sql := "SELECT type, name, address, status_address FROM INFORMATION_SCHEMA.TIDB_CLUSTER_INFO"
+	rows, _, err := ctx.(sqlexec.RestrictedSQLExecutor).ExecRestrictedSQL(sql)
+	if err != nil {
+		return nil, err
+	}
+
+	type result struct {
+		rows [][]types.Datum
+		err  error
+	}
+
+	var finalRows [][]types.Datum
+	wg := sync.WaitGroup{}
+	ch := make(chan result, len(rows))
+	for _, row := range rows {
+		typ := row.GetString(0)
+		name := row.GetString(1)
+		address := row.GetString(2)
+		statusAddr := row.GetString(3)
+		if len(statusAddr) == 0 {
+			ctx.GetSessionVars().StmtCtx.AppendWarning(errors.Errorf("%s node %s(%s) does not contain status address", typ, name, address))
+			continue
+		}
+
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			var url string
+			switch typ {
+			case "pd":
+				url = fmt.Sprintf("http://%s/pd/api/v1/config", statusAddr)
+			case "tikv", "tidb":
+				url = fmt.Sprintf("http://%s/config", statusAddr)
+			default:
+				ch <- result{err: errors.Errorf("unknown node: %s(%s)", typ, address)}
+				return
+			}
+			resp, err := http.Get(url)
+			if err != nil {
+				ch <- result{err: err}
+				return
+			}
+			defer resp.Body.Close()
+
+			var nested map[string]interface{}
+			if err = json.NewDecoder(resp.Body).Decode(&nested); err != nil {
+				ch <- result{err: err}
+				return
+			}
+			data, err := flatten.Flatten(nested, "", flatten.DotStyle)
+			if err != nil {
+				ch <- result{err: err}
+				return
+			}
+			var rows [][]types.Datum
+			for key, val := range data {
+				rows = append(rows, types.MakeDatums(
+					typ,
+					name,
+					address,
+					key,
+					fmt.Sprintf("%v", val),
+				))
+			}
+			ch <- result{rows: rows}
+		}()
+	}
+
+	wg.Wait()
+	close(ch)
+	for result := range ch {
+		if result.err != nil {
+			ctx.GetSessionVars().StmtCtx.AppendWarning(err)
+			continue
+		}
+		finalRows = append(finalRows, result.rows...)
+	}
+	return finalRows, nil
 }
 
 var tableNameToColumns = map[string][]columnInfo{
@@ -1985,6 +2076,7 @@ var tableNameToColumns = map[string][]columnInfo{
 	tableTiKVRegionPeers:                    tableTiKVRegionPeersCols,
 	tableTiDBServersInfo:                    tableTiDBServersInfoCols,
 	tableTiDBClusterInfo:                    tableTiDBClusterInfoCols,
+	tableTiDBClusterConfig:                  tableTiDBClusterConfigCols,
 }
 
 func createInfoSchemaTable(handle *Handle, meta *model.TableInfo) *infoschemaTable {
@@ -2092,6 +2184,8 @@ func (it *infoschemaTable) getRows(ctx sessionctx.Context, cols []*table.Column)
 		fullRows, err = dataForServersInfo()
 	case tableTiDBClusterInfo:
 		fullRows, err = dataForTiDBClusterInfo(ctx)
+	case tableTiDBClusterConfig:
+		fullRows, err = dataForClusterConfig(ctx)
 	}
 	if err != nil {
 		return nil, err
