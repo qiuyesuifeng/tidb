@@ -1653,18 +1653,6 @@ func (e *TiDBInspectionExec) Next(ctx context.Context, req *chunk.Chunk) error {
 		}
 	}
 
-	// fill Test Table
-	/*
-		idx++
-		req.AppendInt64(0, idx)
-		req.AppendString(1, "fill persist tables")
-		if err := e.i.TestWriteTable(); err != nil {
-			req.AppendString(2, err.Error())
-		} else {
-			req.AppendString(2, "OK")
-		}
-	*/
-
 	// generate TIDB_CLUSTER_INFO table
 	idx++
 	req.AppendInt64(0, idx)
@@ -1690,6 +1678,16 @@ func (e *TiDBInspectionExec) Next(ctx context.Context, req *chunk.Chunk) error {
 	req.AppendInt64(0, idx)
 	req.AppendString(1, "generate [TIDB_CLUSTER_KEY_METRICS_INFO] table")
 	if err := e.i.GetTiDBClusterKeyMetricsInfo(); err != nil {
+		return errors.Trace(err)
+	} else {
+		req.AppendString(2, "OK")
+	}
+
+	// generate TIDB_KEY_METRICS_INFO table
+	idx++
+	req.AppendInt64(0, idx)
+	req.AppendString(1, "generate [TIDB_KEY_METRICS_INFO] table")
+	if err := e.i.GetTiDBKeyMetricsInfo(); err != nil {
 		return errors.Trace(err)
 	} else {
 		req.AppendString(2, "OK")
