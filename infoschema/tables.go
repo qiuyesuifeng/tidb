@@ -84,16 +84,6 @@ const (
 	tableTiKVRegionStatus                   = "TIKV_REGION_STATUS"
 	tableTiKVRegionPeers                    = "TIKV_REGION_PEERS"
 	tableTiDBServersInfo                    = "TIDB_SERVERS_INFO"
-
-	/* TiDB Inspection Tables Info. */
-	tableTiDBClusterInfo     = "TIDB_CLUSTER_INFO"
-	tableSystemInfo          = "SYSTEM_INFO"
-	tableTiDBKeyMetrcisInfo  = "TIDB_KEY_METRICS_INFO"
-	tableTiKVKeyMetrcisInfo  = "TIKV_KEY_METRICS_INFO"
-	tableTiDBPerformanceInfo = "TIDB_PERFORMANCE_INFO"
-	tableTiKVPerformanceInfo = "TIKV_PERFORMANCE_INFO"
-	tableTiDBErrorInfo       = "TIDB_ERROR_INFO"
-	tableTiKVErrorInfo       = "TIKV_ERROR_INFO"
 )
 
 type columnInfo struct {
@@ -2021,16 +2011,6 @@ var tableNameToColumns = map[string][]columnInfo{
 	tableTiKVRegionStatus:                   tableTiKVRegionStatusCols,
 	tableTiKVRegionPeers:                    tableTiKVRegionPeersCols,
 	tableTiDBServersInfo:                    tableTiDBServersInfoCols,
-
-	/* TiDB Inspection Tables Info. */
-	tableTiDBClusterInfo:     tableTiDBClusterInfoCols,
-	tableSystemInfo:          tableSystemInfoCols,
-	tableTiDBKeyMetrcisInfo:  tableTiDBKeyMetrcisInfoCols,
-	tableTiKVKeyMetrcisInfo:  tableTiKVKeyMetrcisInfoCols,
-	tableTiDBPerformanceInfo: tableTiDBPerformanceInfoCols,
-	tableTiKVPerformanceInfo: tableTiKVPerformanceInfoCols,
-	tableTiDBErrorInfo:       tableTiDBErrorInfoCols,
-	tableTiKVErrorInfo:       tableTiDBErrorInfoCols,
 }
 
 func createInfoSchemaTable(handle *Handle, meta *model.TableInfo) *infoschemaTable {
@@ -2136,22 +2116,6 @@ func (it *infoschemaTable) getRows(ctx sessionctx.Context, cols []*table.Column)
 		fullRows, err = dataForTikVRegionPeers(ctx)
 	case tableTiDBServersInfo:
 		fullRows, err = dataForServersInfo()
-	case tableTiDBClusterInfo:
-		fullRows, err = dataForTiDBClusterInfo(ctx)
-	case tableSystemInfo:
-		//TODO
-	case tableTiDBKeyMetrcisInfo:
-		//TODO
-	case tableTiKVKeyMetrcisInfo:
-		//TODO
-	case tableTiDBPerformanceInfo:
-		//TODO
-	case tableTiKVPerformanceInfo:
-		//TODO
-	case tableTiDBErrorInfo:
-		//TODO
-	case tableTiKVErrorInfo:
-		//TODO
 	}
 	if err != nil {
 		return nil, err

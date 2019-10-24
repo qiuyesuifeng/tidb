@@ -1641,9 +1641,18 @@ func (e *TiDBInspectionExec) Next(ctx context.Context, req *chunk.Chunk) error {
 	}
 
 	// Step 2. Create inspection table
-	req.AppendInt64(0, 0)
+	req.AppendInt64(0, 1)
 	req.AppendString(1, "create inspection tables")
 	if err := e.i.CreateInspectionTables(); err != nil {
+		req.AppendString(2, err.Error())
+	} else {
+		req.AppendString(2, "finished")
+	}
+
+	// Step 3. Fill inspectionPersistTables
+	req.AppendInt64(0, 2)
+	req.AppendString(1, "fill persist tables")
+	if err := e.i.TestWriteTable(); err != nil {
 		req.AppendString(2, err.Error())
 	} else {
 		req.AppendString(2, "finished")
