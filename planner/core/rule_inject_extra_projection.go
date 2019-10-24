@@ -45,9 +45,9 @@ func (pe *projInjector) inject(plan PhysicalPlan) PhysicalPlan {
 
 	switch p := plan.(type) {
 	case *PhysicalHashAgg:
-		plan = injectProjBelowAgg(plan, p.AggFuncs, p.GroupByItems)
+		plan = injectProjBelowAgg(plan, p.AggFuncs, p.GroupByItems, p.StreamWindow)
 	case *PhysicalStreamAgg:
-		plan = injectProjBelowAgg(plan, p.AggFuncs, p.GroupByItems)
+		plan = injectProjBelowAgg(plan, p.AggFuncs, p.GroupByItems, nil)
 	case *PhysicalSort:
 		plan = injectProjBelowSort(p, p.ByItems)
 	case *PhysicalTopN:
@@ -70,7 +70,7 @@ func wrapCastForAggFuncs(sctx sessionctx.Context, aggFuncs []*aggregation.AggFun
 // injectProjBelowAgg injects a ProjOperator below AggOperator. If all the args
 // of `aggFuncs`, and all the item of `groupByItems` are columns or constants,
 // we do not need to build the `proj`.
-func injectProjBelowAgg(aggPlan PhysicalPlan, aggFuncs []*aggregation.AggFuncDesc, groupByItems []expression.Expression) PhysicalPlan {
+func injectProjBelowAgg(aggPlan PhysicalPlan, aggFuncs []*aggregation.AggFuncDesc, groupByItems []expression.Expression, sw *aggregation.AggWindowDesc) PhysicalPlan {
 	hasScalarFunc := false
 
 	wrapCastForAggFuncs(aggPlan.SCtx(), aggFuncs)
@@ -88,7 +88,12 @@ func injectProjBelowAgg(aggPlan PhysicalPlan, aggFuncs []*aggregation.AggFuncDes
 		return aggPlan
 	}
 
-	projSchemaCols := make([]*expression.Column, 0, len(aggFuncs)+len(groupByItems))
+	var projSchemaCols []*expression.Column
+	if sw == nil {
+		projSchemaCols = make([]*expression.Column, 0, len(aggFuncs)+len(groupByItems))
+	} else {
+		projSchemaCols = make([]*expression.Column, 0, len(aggFuncs)+len(groupByItems)+1)
+	}
 	projExprs := make([]expression.Expression, 0, cap(projSchemaCols))
 	cursor := 0
 
@@ -124,6 +129,28 @@ func injectProjBelowAgg(aggPlan PhysicalPlan, aggFuncs []*aggregation.AggFuncDes
 		projSchemaCols = append(projSchemaCols, newArg)
 		groupByItems[i] = newArg
 		cursor++
+	}
+
+	if sw != nil {
+		for i, col := range aggPlan.Children()[0].Schema().Columns {
+			if col.ColName.L == sw.WinColName {
+				expr := &expression.Column{
+					UniqueID: aggPlan.SCtx().GetSessionVars().AllocPlanColumnID(),
+					RetType:  col.GetType(),
+					ColName:  model.NewCIStr(sw.WinColName),
+					Index:    i,
+				}
+				projExprs = append(projExprs, expr)
+
+				col := &expression.Column{
+					UniqueID: aggPlan.SCtx().GetSessionVars().AllocPlanColumnID(),
+					RetType:  col.GetType(),
+					ColName:  model.NewCIStr(sw.WinColName),
+					Index:    cursor,
+				}
+				projSchemaCols = append(projSchemaCols, col)
+			}
+		}
 	}
 
 	child := aggPlan.Children()[0]

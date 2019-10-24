@@ -14,6 +14,8 @@
 package core
 
 import (
+	"context"
+
 	"github.com/pingcap/parser/model"
 	"github.com/pingcap/parser/mysql"
 	"github.com/pingcap/tidb/expression"
@@ -23,7 +25,7 @@ import (
 type streamWindowCompleter struct {
 }
 
-func (s *streamWindowCompleter) optimize(lp LogicalPlan) (LogicalPlan, error) {
+func (s *streamWindowCompleter) optimize(ctx context.Context, lp LogicalPlan) (LogicalPlan, error) {
 	lp.CompleteStreamWindow()
 	return lp, nil
 }
@@ -56,4 +58,8 @@ func (la *LogicalAggregation) CompleteStreamWindow() []*expression.Column {
 		return x
 	}
 	return nil
+}
+
+func (s *streamWindowCompleter) name() string{
+	return "stream_window_col_completer"
 }

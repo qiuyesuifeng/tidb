@@ -15,12 +15,18 @@ package executor
 
 import (
 	gojson "encoding/json"
+	"strconv"
+	"strings"
 
+	"github.com/cznic/mathutil"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/parser/model"
+	"github.com/pingcap/tidb/sessionctx/variable"
 	"github.com/pingcap/tidb/types"
 	"github.com/pingcap/tidb/types/json"
 	"github.com/pingcap/tidb/util/chunk"
+	"github.com/pingcap/tidb/util/mock"
+
 	// log "github.com/sirupsen/logrus"
 	"golang.org/x/net/context"
 )
@@ -63,96 +69,96 @@ type StreamReaderExecutor struct {
 }
 
 func (e *StreamReaderExecutor) setVariableName(tp string) {
-	// if tp == "kafka" {
-	// 	e.variableName = variable.TiDBKafkaStreamTablePos
-	// } else if tp == "pulsar" {
-	// 	e.variableName = variable.TiDBPulsarStreamTablePos
-	// } else if tp == "log" {
-	// 	e.variableName = variable.TiDBLogStreamTablePos
-	// } else if tp == "demo" {
-	// 	e.variableName = variable.TiDBStreamTableDemoPos
-	// }
+	if tp == "kafka" {
+		e.variableName = variable.TiDBKafkaStreamTablePos
+	} else if tp == "pulsar" {
+		e.variableName = variable.TiDBPulsarStreamTablePos
+	} else if tp == "log" {
+		e.variableName = variable.TiDBLogStreamTablePos
+	} else if tp == "demo" {
+		e.variableName = variable.TiDBStreamTableDemoPos
+	}
 }
 
 // Open initialzes necessary variables for using this executor.
 func (e *StreamReaderExecutor) Open(ctx context.Context) error {
-	// tp, ok := e.Table.StreamProperties["type"]
-	// if !ok {
-	// 	return errors.New("Cannot find stream table type")
-	// }
+	 tp, ok := e.Table.StreamProperties["type"]
+	 if !ok {
+	 	return errors.New("Cannot find stream table type")
+	 }
 
-	// e.tp = tp
-	// e.setVariableName(strings.ToLower(tp))
+	 e.tp = tp
+	 e.setVariableName(strings.ToLower(tp))
 
-	// e.topic, ok = e.Table.StreamProperties["topic"]
-	// if !ok {
-	// 	return errors.New("Cannot find stream table topic")
-	// }
+	 e.topic, ok = e.Table.StreamProperties["topic"]
+	 if !ok {
+	 	return errors.New("Cannot find stream table topic")
+	 }
 
-	// var err error
-	// value, err := e.ctx.GetSessionVars().GlobalVarsAccessor.GetGlobalSysVar(e.variableName)
-	// if err != nil {
-	// 	return errors.Trace(err)
-	// }
-	// if value != "" {
-	// 	e.pos, err = strconv.Atoi(value)
-	// 	if err != nil {
-	// 		return errors.Trace(err)
-	// 	}
-	// } else {
-	// 	err = e.ctx.GetSessionVars().GlobalVarsAccessor.SetGlobalSysVar(e.variableName, "0")
-	// 	if err != nil {
-	// 		return errors.Trace(err)
-	//	}
-	//}
+	 var err error
+	 value, err := e.ctx.GetSessionVars().GlobalVarsAccessor.GetGlobalSysVar(e.variableName)
+	 if err != nil {
+	 	return errors.Trace(err)
+	 }
+	 if value != "" {
+	 	e.pos, err = strconv.Atoi(value)
+	 	if err != nil {
+	 		return errors.Trace(err)
+	 	}
+	 } else {
+	 	err = e.ctx.GetSessionVars().GlobalVarsAccessor.SetGlobalSysVar(e.variableName, "0")
+	 	if err != nil {
+	 		return errors.Trace(err)
+		}
+	}
 
 	return nil
 }
 
 // Next fills data into the chunk passed by its caller.
 func (e *StreamReaderExecutor) Next(ctx context.Context, chk *chunk.Chunk) error {
-	// value, err := e.ctx.GetSessionVars().GlobalVarsAccessor.GetGlobalSysVar(e.variableName)
-	// if err != nil {
-	// 	return errors.Trace(err)
-	// }
-	// e.pos, err = strconv.Atoi(value)
-	// if err != nil {
-	// 	return errors.Trace(err)
-	// }
+	 value, err := e.ctx.GetSessionVars().GlobalVarsAccessor.GetGlobalSysVar(e.variableName)
+	 if err != nil {
+	 	return errors.Trace(err)
+	 }
+	 e.pos, err = strconv.Atoi(value)
+	 if err != nil {
+	 	return errors.Trace(err)
+	 }
 
-	// pos := 0
-	// chk.GrowAndReset(e.maxChunkSize)
-	// if e.result == nil {
-	// 	e.result = e.newFirstChunk()
-	// 	pos, err = e.fetchAll(e.pos)
-	// 	if err != nil {
-	// 		return errors.Trace(err)
-	// 	}
-	// 	iter := chunk.NewIterator4Chunk(e.result)
-	// 	for colIdx := 0; colIdx < e.Schema().Len(); colIdx++ {
-	// 		retType := e.Schema().Columns[colIdx].RetType
-	// 		if !types.IsTypeVarchar(retType.Tp) {
-	// 			continue
-	// 		}
-	// 		for row := iter.Begin(); row != iter.End(); row = iter.Next() {
-	// 			if valLen := len(row.GetString(colIdx)); retType.Flen < valLen {
-	// 				retType.Flen = valLen
-	// 			}
-	// 		}
-	// 	}
-	// }
-	// if e.cursor >= e.result.NumRows() {
-	// 	return nil
-	// }
-	// numCurBatch := mathutil.Min(chk.Capacity(), e.result.NumRows()-e.cursor)
-	// chk.Append(e.result, e.cursor, e.cursor+numCurBatch)
-	// e.cursor += numCurBatch
+	 pos := 0
+	 chk.GrowAndReset(e.maxChunkSize)
+	 if e.result == nil {
+	 	e.result = newFirstChunk(e)
+	 	pos, err = e.fetchAll(e.pos)
+	 	if err != nil {
+	 		return errors.Trace(err)
+	 	}
+	 	iter := chunk.NewIterator4Chunk(e.result)
+	 	for colIdx := 0; colIdx < e.Schema().Len(); colIdx++ {
+	 		retType := e.Schema().Columns[colIdx].RetType
+	 		if !types.IsTypeVarchar(retType.Tp) {
+	 			continue
+	 		}
+	 		for row := iter.Begin(); row != iter.End(); row = iter.Next() {
+	 			if valLen := len(row.GetString(colIdx)); retType.Flen < valLen {
+	 				retType.Flen = valLen
+	 			}
+	 		}
+	 	}
+	 }
+	 if e.cursor >= e.result.NumRows() {
+	 	return nil
+	 }
+	 numCurBatch := mathutil.Min(chk.Capacity(), e.result.NumRows()-e.cursor)
+	 chk.Append(e.result, e.cursor, e.cursor+numCurBatch)
+	 e.cursor += numCurBatch
 
-	// e.pos = pos
-	// err = e.ctx.GetSessionVars().GlobalVarsAccessor.SetGlobalSysVar(e.variableName, strconv.Itoa(e.pos))
-	// if err != nil {
-	// 	return errors.Trace(err)
-	//}
+	 e.pos = pos
+	 err = e.ctx.GetSessionVars().GlobalVarsAccessor.SetGlobalSysVar(e.variableName, strconv.Itoa(e.pos))
+	 if err != nil {
+	 	return errors.Trace(err)
+	}
 
 	return nil
 }
@@ -192,22 +198,22 @@ func (e *StreamReaderExecutor) fetchAll(cursor int) (int, error) {
 }
 
 func (e *StreamReaderExecutor) fetchMockData(cursor int) (int, error) {
-	// var pos int
-	// for i := cursor; i < maxFetchCnt && i < cursor+batchFetchCnt; {
-	// 	data, err := e.getData(mock.MockStreamJsonData[i])
-	// 	if err != nil {
-	// 		return 0, errors.Trace(err)
-	// 	}
+	 var pos int
+	 for i := cursor; i < maxFetchCnt && i < cursor+batchFetchCnt; {
+	 	data, err := e.getData(mock.MockStreamJsonData[i])
+	 	if err != nil {
+	 		return 0, errors.Trace(err)
+	 	}
 
-	// 	row := chunk.MutRowFromDatums(data).ToRow()
-	// 	e.result.AppendRow(row)
+	 	row := chunk.MutRowFromDatums(data).ToRow()
+	 	e.result.AppendRow(row)
 
-	// 	i++
-	//	pos = i
-	// }
-	//
-	//return pos, nil
-	return 0, nil
+	 	i++
+		pos = i
+	 }
+
+	return pos, nil
+	//return 0, nil
 }
 
 func (e *StreamReaderExecutor) fetchKafkaData(cursor int) (int, error) {
@@ -240,27 +246,27 @@ func (e *StreamReaderExecutor) fetchKafkaData(cursor int) (int, error) {
 }
 
 func (e *StreamReaderExecutor) fetchMockKafkaData(cursor int) (int, error) {
-	//	var pos int
-	//	for i := cursor; i < maxFetchCnt && i < cursor+batchFetchCnt; i++ {
-	//		row := []interface{}{mock.MockKafkaStreamData[i].ID, mock.MockKafkaStreamData[i].Content, mock.MockKafkaStreamData[i].CreateTime}
-	//		e.appendRow(e.result, row)
-	//		pos = i
-	//	}
-	//
-	//	return pos, nil
-	return 0, nil
+		var pos int
+		for i := cursor; i < maxFetchCnt && i < cursor+batchFetchCnt; i++ {
+			row := []interface{}{mock.MockKafkaStreamData[i].ID, mock.MockKafkaStreamData[i].Content, mock.MockKafkaStreamData[i].CreateTime}
+			e.appendRow(e.result, row)
+			pos = i
+		}
+
+		return pos, nil
+	//return 0, nil
 }
 
 func (e *StreamReaderExecutor) fetchMockPulsarData(cursor int) (int, error) {
-	//	var pos int
-	//	for i := cursor; i < maxFetchCnt && i < cursor+batchFetchCnt; i++ {
-	//		row := []interface{}{mock.MockPulsarStreamData[i].ID, mock.MockPulsarStreamData[i].Content, mock.MockPulsarStreamData[i].CreateTime}
-	//		e.appendRow(e.result, row)
-	//		pos = i
-	//	}
-	//
-	//	return pos, nil
-	return 0, nil
+		var pos int
+		for i := cursor; i < maxFetchCnt && i < cursor+batchFetchCnt; i++ {
+			row := []interface{}{mock.MockPulsarStreamData[i].ID, mock.MockPulsarStreamData[i].Content, mock.MockPulsarStreamData[i].CreateTime}
+			e.appendRow(e.result, row)
+			pos = i
+		}
+
+		return pos, nil
+	//return 0, nil
 }
 
 func (e *StreamReaderExecutor) getData(data string) ([]types.Datum, error) {

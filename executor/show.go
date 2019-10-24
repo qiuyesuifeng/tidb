@@ -310,13 +310,14 @@ func (e *ShowExec) fetchShowTables(showStream bool) error {
 		if checker != nil && !checker.RequestVerification(activeRoles, e.DBName.O, v.Meta().Name.O, "", mysql.AllPrivMask) {
 			continue
 		}
-		tableNames = append(tableNames, v.Meta().Name.O)
 		if showStream == true {
 			if v.Meta().IsStream == true {
 				tableNames = append(tableNames, v.Meta().Name.O)
 			}
-
 		} else {
+			if v.Meta().IsStream == false {
+				tableNames = append(tableNames, v.Meta().Name.O)
+			}
 			if v.Meta().IsView() {
 				tableTypes[v.Meta().Name.O] = "VIEW"
 			} else {

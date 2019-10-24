@@ -199,6 +199,7 @@ func (p *preprocessor) Leave(in ast.Node) (out ast.Node, ok bool) {
 		if p.hasStreamTable && x.GroupBy != nil && x.StreamWindowSpec == nil {
 			p.err = errors.New("Can not execute aggregation on stream table without time window")
 		}
+
 		if x.StreamWindowSpec != nil {
 			x.StreamWindowSpec.WinCol = p.strWinColName
 		}

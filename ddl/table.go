@@ -65,13 +65,6 @@ func onCreateTable(d *ddlCtx, t *meta.Meta, job *model.Job) (ver int64, _ error)
 		return ver, errors.Trace(err)
 	}
 
-	// Fill in TableInfo.StreamWinCol
-	for _, c := range tbInfo.Columns {
-		if c.Tp == mysql.TypeTimestamp {
-			tbInfo.StreamWinCol = c.Name.L
-		}
-	}
-
 	switch tbInfo.State {
 	case model.StateNone:
 		// none -> public
@@ -108,6 +101,15 @@ func onCreateStream(d *ddlCtx, t *meta.Meta, job *model.Job) (ver int64, _ error
 	ver, err = updateSchemaVersion(t, job)
 	if err != nil {
 		return ver, errors.Trace(err)
+	}
+
+	// Fill in TableInfo.StreamWinCol
+	// FIXME: Currently, we use the first `TIMESTAMP` column as streamWinCol.
+	// 		  There may better way. We'll improve it latter.
+	for _, c := range tbInfo.Columns {
+		if c.Tp == mysql.TypeTimestamp {
+			tbInfo.StreamWinCol = c.Name.L
+		}
 	}
 
 	switch tbInfo.State {
