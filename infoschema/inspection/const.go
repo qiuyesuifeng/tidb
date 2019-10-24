@@ -67,7 +67,7 @@ const tableSystemInfo = `CREATE TABLE %s.SYSTEM_INFO (
 
 const tableTiDBClusterKeyMetrcisInfo = `CREATE TABLE %s.TIDB_CLUSTER_KEY_METRICS_INFO (
   ID bigint(21) unsigned DEFAULT NULL,
-  CONNECTION_COUNT varchar(64) unsigned DEFAULT NULL,
+  CONNECTION_COUNT varchar(64) DEFAULT NULL,
   QUERY_OK_COUNT varchar(64) DEFAULT NULL,
   QUERY_ERR_COUNT varchar(64) DEFAULT NULL,
   INSERT_COUNT varchar(64) DEFAULT NULL,
