@@ -409,7 +409,7 @@ func (i *InspectionHelper) GetTiDBClusterKeyMetricsInfo() error {
 	if err != nil {
 		return errors.Trace(err)
 	}
-	tidbTotalConnection := result.(pmodel.Vector)[0].Value
+	tidbTotalConnection := fmt.Sprintf("%.2f", result.(pmodel.Vector)[0].Value)
 
 	// get ok/error query count.
 	tidbTotalQPSQuery := `sum(rate(tidb_server_query_total[1m])) by (result)`
@@ -418,8 +418,8 @@ func (i *InspectionHelper) GetTiDBClusterKeyMetricsInfo() error {
 		return errors.Trace(err)
 	}
 
-	tidbTotalOKQPS := getTotalQPSCount(result.(pmodel.Vector), "OK")
-	tidbTotalErrQPS := getTotalQPSCount(result.(pmodel.Vector), "Error")
+	tidbTotalOKQPS := fmt.Sprintf("%.2f", getTotalQPSCount(result.(pmodel.Vector), "OK"))
+	tidbTotalErrQPS := fmt.Sprintf("%.2f", getTotalQPSCount(result.(pmodel.Vector), "Error"))
 
 	// get statements count.
 	statementQuery := `sum(rate(tidb_executor_statement_total[1m])) by (type)`
@@ -428,11 +428,11 @@ func (i *InspectionHelper) GetTiDBClusterKeyMetricsInfo() error {
 		return errors.Trace(err)
 	}
 
-	insertStatementCount := getStatementCount(result.(pmodel.Vector), "Insert")
-	updateStatementCount := getStatementCount(result.(pmodel.Vector), "Update")
-	deleteStatementCount := getStatementCount(result.(pmodel.Vector), "Delete")
-	replaceStatementCount := getStatementCount(result.(pmodel.Vector), "Replace")
-	selectStatementCount := getStatementCount(result.(pmodel.Vector), "Select")
+	insertStatementCount := fmt.Sprintf("%.2f", getStatementCount(result.(pmodel.Vector), "Insert"))
+	updateStatementCount := fmt.Sprintf("%.2f", getStatementCount(result.(pmodel.Vector), "Update"))
+	deleteStatementCount := fmt.Sprintf("%.2f", getStatementCount(result.(pmodel.Vector), "Delete"))
+	replaceStatementCount := fmt.Sprintf("%.2f", getStatementCount(result.(pmodel.Vector), "Replace"))
+	selectStatementCount := fmt.Sprintf("%.2f", getStatementCount(result.(pmodel.Vector), "Select"))
 
 	// get query 80/90/99/999 value.
 	query80 := `histogram_quantile(0.80, sum(rate(tidb_server_handle_query_duration_seconds_bucket[1m])) by (le))`
