@@ -553,7 +553,7 @@ func (i *InspectionHelper) getTiDBKeyMetricsInfo(item ClusterItem) error {
 	}
 	upTime := fmt.Sprintf("%.2fhour", getValue(result.(pmodel.Vector), instance)/60/60)
 
-	sql := fmt.Sprintf(`insert into %s.TIDB_KEY_METRICS_INFO values (%d, "%s", "%s", "%s", "%s", "%s",
+	sql := fmt.Sprintf(`insert into %s.TIDB_KEY_METRICS_INFO values (%d, "%s", "%s", "%s", "%s",
 		"%s", "%s", "%s", 
 		"%s", "%s", "%s", "%s", "%s");`,
 		i.dbName, item.ID, item.Type, item.Name, item.IP, item.Address,
