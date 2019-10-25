@@ -717,12 +717,12 @@ func (i *InspectionHelper) getTiKVPerfornamnceInfo(item ClusterItem) error {
 		return errors.Trace(err)
 	}
 
-	kvGetDuration := fmt.Sprintf("%.2f", 1000*getKVDuration(result.(pmodel.Vector), "kv_get"))
-	kvBatchGetDuration := fmt.Sprintf("%.2f", 1000*getKVDuration(result.(pmodel.Vector), "kv_batch_get"))
-	kvScanDuration := fmt.Sprintf("%.2f", 1000*getKVDuration(result.(pmodel.Vector), "kv_scan"))
-	kvPreWriteDuration := fmt.Sprintf("%.2f", 1000*getKVDuration(result.(pmodel.Vector), "kv_prewrite"))
-	kvCommitDuration := fmt.Sprintf("%.2f", 1000*getKVDuration(result.(pmodel.Vector), "kv_commit"))
-	kvCoprocessorDuration := fmt.Sprintf("%.2f", 1000*getKVDuration(result.(pmodel.Vector), "coprocessor"))
+	kvGetDuration := fmt.Sprintf("%.2fms", 1000*getKVDuration(result.(pmodel.Vector), "kv_get"))
+	kvBatchGetDuration := fmt.Sprintf("%.2fms", 1000*getKVDuration(result.(pmodel.Vector), "kv_batch_get"))
+	kvScanDuration := fmt.Sprintf("%.2fms", 1000*getKVDuration(result.(pmodel.Vector), "kv_scan"))
+	kvPreWriteDuration := fmt.Sprintf("%.2fms", 1000*getKVDuration(result.(pmodel.Vector), "kv_prewrite"))
+	kvCommitDuration := fmt.Sprintf("%.2fms", 1000*getKVDuration(result.(pmodel.Vector), "kv_commit"))
+	kvCoprocessorDuration := fmt.Sprintf("%.2fms", 1000*getKVDuration(result.(pmodel.Vector), "coprocessor"))
 
 	// get raft store cpu usage.
 	raftStoreCpuUsageQuery := fmt.Sprintf(`sum(rate(tikv_thread_cpu_seconds_total{instance="%s", name=~"raftstore_.*"}[1m])) by (instance)`, instance)

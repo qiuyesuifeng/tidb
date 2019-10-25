@@ -1653,18 +1653,6 @@ func (e *TiDBInspectionExec) Next(ctx context.Context, req *chunk.Chunk) error {
 		}
 	}
 
-	// fill Test Table
-	/*
-		idx++
-		req.AppendInt64(0, idx)
-		req.AppendString(1, "fill persist tables")
-		if err := e.i.TestWriteTable(); err != nil {
-			req.AppendString(2, err.Error())
-		} else {
-			req.AppendString(2, "OK")
-		}
-	*/
-
 	// generate TIDB_CLUSTER_INFO table
 	idx++
 	req.AppendInt64(0, idx)
