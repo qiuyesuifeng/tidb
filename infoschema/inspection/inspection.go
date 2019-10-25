@@ -575,9 +575,11 @@ func (i *InspectionHelper) GetTiDBKeyMetricsInfo() error {
 	}
 
 	for _, item := range i.items {
-		err = i.getTiDBKeyMetricsInfo(item)
-		if err != nil {
-			return errors.Trace(err)
+		if item.Type == "tidb" {
+			err = i.getTiDBKeyMetricsInfo(item)
+			if err != nil {
+				return errors.Trace(err)
+			}
 		}
 	}
 
