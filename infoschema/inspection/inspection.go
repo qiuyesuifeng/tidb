@@ -476,13 +476,29 @@ func (i *InspectionHelper) GetTiDBClusterKeyMetricsInfo() error {
 	}
 	query999Value := fmt.Sprintf("%.2fms", 1000*result.(pmodel.Vector)[0].Value)
 
+	// get available size.
+	availableQuery := `sum(tikv_store_size_bytes{type="available"}) by (instance)`
+	result, err = api.Query(ctx, availableQuery, time.Now())
+	if err != nil {
+		return errors.Trace(err)
+	}
+	available := fmt.Sprintf("%.2fGiB", result.(pmodel.Vector)[0].Value/1024/1024/1024)
+
+	// get capacity size.
+	capacityQuery := `sum(tikv_store_size_bytes{type="capacity"}) by (instance)`
+	result, err = api.Query(ctx, capacityQuery, time.Now())
+	if err != nil {
+		return errors.Trace(err)
+	}
+	capacity := fmt.Sprintf("%.2fGiB", result.(pmodel.Vector)[0].Value/1024/1024/1024)
+
 	clusterID := 0
 	sql := fmt.Sprintf(`insert into %s.TIDB_CLUSTER_KEY_METRICS_INFO values (%d, "%s", "%s", "%s", 
 		"%s", "%s", "%s", "%s", "%s", 
-		"%s", "%s", "%s", "%s");`,
+		"%s", "%s", "%s", "%s", "%s", "%s");`,
 		i.dbName, clusterID, tidbTotalConnection, tidbTotalOKQPS, tidbTotalErrQPS,
 		insertStatementCount, updateStatementCount, deleteStatementCount, replaceStatementCount, selectStatementCount,
-		query80Value, query95Value, query99Value, query999Value)
+		query80Value, query95Value, query99Value, query999Value, available, capacity)
 
 	_, _, err = i.ctx.(sqlexec.RestrictedSQLExecutor).ExecRestrictedSQL(sql)
 	if err != nil {
@@ -577,6 +593,107 @@ func (i *InspectionHelper) GetTiDBKeyMetricsInfo() error {
 	for _, item := range i.items {
 		if item.Type == "tidb" {
 			err = i.getTiDBKeyMetricsInfo(item)
+			if err != nil {
+				return errors.Trace(err)
+			}
+		}
+	}
+
+	return nil
+}
+
+func (i *InspectionHelper) getTiKVKeyMetricsInfo(item ClusterItem) error {
+	api := v1.NewAPI(i.promClient)
+	ctx, cancel := context.WithTimeout(context.Background(), promReadTimeout)
+	defer cancel()
+
+	instance := item.Address
+
+	// get available size.
+	availableQuery := fmt.Sprintf(`sum(tikv_store_size_bytes{instance="%s", type="available"}) by (instance)`, instance)
+	result, err := api.Query(ctx, availableQuery, time.Now())
+	if err != nil {
+		return errors.Trace(err)
+	}
+	available := fmt.Sprintf("%.2fGiB", result.(pmodel.Vector)[0].Value/1024/1024/1024)
+
+	// get capacity size.
+	capacityQuery := fmt.Sprintf(`sum(tikv_store_size_bytes{instance="%s", type="capacity"}) by (instance)`, instance)
+	result, err = api.Query(ctx, capacityQuery, time.Now())
+	if err != nil {
+		return errors.Trace(err)
+	}
+	capacity := fmt.Sprintf("%.2fGiB", result.(pmodel.Vector)[0].Value/1024/1024/1024)
+
+	// get cpu usage.
+	cpuUsageQuery := `sum(rate(tikv_thread_cpu_seconds_total[1m])) by (instance)`
+	result, err = api.Query(ctx, cpuUsageQuery, time.Now())
+	if err != nil {
+		return errors.Trace(err)
+	}
+	cpuUsage := fmt.Sprintf("%.2f%%", 100*getValue(result.(pmodel.Vector), instance))
+
+	// get memory used.
+	memoryQuery := `avg(process_resident_memory_bytes) by (instance)`
+	result, err = api.Query(ctx, memoryQuery, time.Now())
+	if err != nil {
+		return errors.Trace(err)
+	}
+	memory := fmt.Sprintf("%.2fMiB", getValue(result.(pmodel.Vector), instance)/1024/1024)
+
+	// get leader count.
+	leaderCountQuery := `sum(tikv_raftstore_region_count{type="leader"}) by (instance)`
+	result, err = api.Query(ctx, leaderCountQuery, time.Now())
+	if err != nil {
+		return errors.Trace(err)
+	}
+	leaderCount := fmt.Sprintf("%.0f", getValue(result.(pmodel.Vector), instance))
+
+	// get region count.
+	regionCountQuery := `sum(tikv_raftstore_region_count{type="region"}) by (instance)`
+	result, err = api.Query(ctx, regionCountQuery, time.Now())
+	if err != nil {
+		return errors.Trace(err)
+	}
+	regionCount := fmt.Sprintf("%.0f", getValue(result.(pmodel.Vector), instance))
+
+	// get up time.
+	kvOpQuery := `sum(rate(tikv_grpc_msg_duration_seconds_count{type!="kv_gc"}[1m])) by (instance,type)`
+	result, err = api.Query(ctx, kvOpQuery, time.Now())
+	if err != nil {
+		return errors.Trace(err)
+	}
+	kvGetCount := fmt.Sprintf("%.2f", getKVCount(result.(pmodel.Vector), instance, "kv_get"))
+	kvBatchGetCount := fmt.Sprintf("%.2f", getKVCount(result.(pmodel.Vector), instance, "kv_batch_get"))
+	kvScanCount := fmt.Sprintf("%.2f", getKVCount(result.(pmodel.Vector), instance, "kv_scan"))
+	kvPreWriteCount := fmt.Sprintf("%.2f", getKVCount(result.(pmodel.Vector), instance, "kv_prewrite"))
+	kvCommitCount := fmt.Sprintf("%.2f", getKVCount(result.(pmodel.Vector), instance, "kv_commit"))
+	kvCoprocessorCount := fmt.Sprintf("%.2f", getKVCount(result.(pmodel.Vector), instance, "coprocessor"))
+
+	sql := fmt.Sprintf(`insert into %s.TIKV_KEY_METRICS_INFO values (%d, "%s", "%s", "%s", "%s",
+		"%s", "%s", "%s", "%s", "%s", "%s", 
+		"%s", "%s", "%s", "%s", "%s", "%s");`,
+		i.dbName, item.ID, item.Type, item.Name, item.IP, item.Address,
+		available, capacity, cpuUsage, memory, leaderCount, regionCount,
+		kvGetCount, kvBatchGetCount, kvScanCount, kvPreWriteCount, kvCommitCount, kvCoprocessorCount)
+
+	_, _, err = i.ctx.(sqlexec.RestrictedSQLExecutor).ExecRestrictedSQL(sql)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	return nil
+}
+
+func (i *InspectionHelper) GetTiKVKeyMetricsInfo() error {
+	err := i.initProm()
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	for _, item := range i.items {
+		if item.Type == "tikv" {
+			err = i.getTiKVKeyMetricsInfo(item)
 			if err != nil {
 				return errors.Trace(err)
 			}
