@@ -48,6 +48,16 @@ func getKVCount(vec model.Vector, instance string, tp string) model.SampleValue 
 	return model.SampleValue(-1.0)
 }
 
+func getKVDuration(vec model.Vector, tp string) model.SampleValue {
+	for _, val := range vec {
+		if val.Metric["type"] == model.LabelValue(tp) {
+			return val.Value
+		}
+	}
+
+	return model.SampleValue(-1.0)
+}
+
 func getQPSCount(vec model.Vector, instance string, result string, tp string) model.SampleValue {
 	for _, val := range vec {
 		if val.Metric["instance"] == model.LabelValue(instance) &&
