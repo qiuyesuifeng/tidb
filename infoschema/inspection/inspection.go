@@ -702,3 +702,97 @@ func (i *InspectionHelper) GetTiKVKeyMetricsInfo() error {
 
 	return nil
 }
+
+func (i *InspectionHelper) getTiKVPerfornamnceInfo(item ClusterItem) error {
+	api := v1.NewAPI(i.promClient)
+	ctx, cancel := context.WithTimeout(context.Background(), promReadTimeout)
+	defer cancel()
+
+	instance := item.Address
+
+	// get 99 gRPC duration.
+	gRPC99DurationQuery := fmt.Sprintf(`histogram_quantile(0.99, sum(rate(tikv_grpc_msg_duration_seconds_bucket{instance="%s", type!="kv_gc"}[1m])) by (le, type))`, instance)
+	result, err := api.Query(ctx, gRPC99DurationQuery, time.Now())
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	kvGetDuration := fmt.Sprintf("%.2f", 1000*getKVDuration(result.(pmodel.Vector), "kv_get"))
+	kvBatchGetDuration := fmt.Sprintf("%.2f", 1000*getKVDuration(result.(pmodel.Vector), "kv_batch_get"))
+	kvScanDuration := fmt.Sprintf("%.2f", 1000*getKVDuration(result.(pmodel.Vector), "kv_scan"))
+	kvPreWriteDuration := fmt.Sprintf("%.2f", 1000*getKVDuration(result.(pmodel.Vector), "kv_prewrite"))
+	kvCommitDuration := fmt.Sprintf("%.2f", 1000*getKVDuration(result.(pmodel.Vector), "kv_commit"))
+	kvCoprocessorDuration := fmt.Sprintf("%.2f", 1000*getKVDuration(result.(pmodel.Vector), "coprocessor"))
+
+	// get raft store cpu usage.
+	raftStoreCpuUsageQuery := fmt.Sprintf(`sum(rate(tikv_thread_cpu_seconds_total{instance="%s", name=~"raftstore_.*"}[1m])) by (instance)`, instance)
+	result, err = api.Query(ctx, raftStoreCpuUsageQuery, time.Now())
+	if err != nil {
+		return errors.Trace(err)
+	}
+	raftStoreCpuUsage := fmt.Sprintf("%.2f%%", 100*getValue(result.(pmodel.Vector), instance))
+
+	// get async apply cpu usage.
+	asyncApplyCpuUsageQuery := fmt.Sprintf(`sum(rate(tikv_thread_cpu_seconds_total{instance="%s", name=~"apply_[0-9]+"}[1m])) by (instance)`, instance)
+	result, err = api.Query(ctx, asyncApplyCpuUsageQuery, time.Now())
+	if err != nil {
+		return errors.Trace(err)
+	}
+	asyncApplyCpuUsage := fmt.Sprintf("%.2f%%", 100*getValue(result.(pmodel.Vector), instance))
+
+	// get scheduler worker cpu usage.
+	schedulerWorkerCpuUsageQuery := fmt.Sprintf(`sum(rate(tikv_thread_cpu_seconds_total{instance="%s", name=~"sched_.*"}[1m])) by (instance)`, instance)
+	result, err = api.Query(ctx, schedulerWorkerCpuUsageQuery, time.Now())
+	if err != nil {
+		return errors.Trace(err)
+	}
+	schedulerWorkerCpuUsage := fmt.Sprintf("%.2f%%", 100*getValue(result.(pmodel.Vector), instance))
+
+	// get coprocessor cpu usage.
+	coprocessorCpuUsageQuery := fmt.Sprintf(`sum(rate(tikv_thread_cpu_seconds_total{instance="%s", name=~"cop_.*"}[1m])) by (instance)`, instance)
+	result, err = api.Query(ctx, coprocessorCpuUsageQuery, time.Now())
+	if err != nil {
+		return errors.Trace(err)
+	}
+	coprocessorCpuUsage := fmt.Sprintf("%.2f%%", 100*getValue(result.(pmodel.Vector), instance))
+
+	// get rocksdb cpu usage.
+	rocksdbCpuUsageQuery := fmt.Sprintf(`sum(rate(tikv_thread_cpu_seconds_total{instance="%s", name=~"rocksdb.*"}[1m])) by (instance)`, instance)
+	result, err = api.Query(ctx, rocksdbCpuUsageQuery, time.Now())
+	if err != nil {
+		return errors.Trace(err)
+	}
+	rocksdbCpuUsage := fmt.Sprintf("%.2f%%", 100*getValue(result.(pmodel.Vector), instance))
+
+	sql := fmt.Sprintf(`insert into %s.TIKV_PERFORMANCE_INFO values (%d, "%s", "%s", "%s", "%s",
+		"%s", "%s", "%s", "%s", "%s", "%s", 
+		"%s", "%s", "%s", "%s", "%s");`,
+		i.dbName, item.ID, item.Type, item.Name, item.IP, item.Address,
+		kvGetDuration, kvBatchGetDuration, kvScanDuration, kvPreWriteDuration, kvCommitDuration, kvCoprocessorDuration,
+		raftStoreCpuUsage, asyncApplyCpuUsage, schedulerWorkerCpuUsage, coprocessorCpuUsage, rocksdbCpuUsage)
+
+	_, _, err = i.ctx.(sqlexec.RestrictedSQLExecutor).ExecRestrictedSQL(sql)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	return nil
+}
+
+func (i *InspectionHelper) GetTiKVPerfornamnceInfo() error {
+	err := i.initProm()
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	for _, item := range i.items {
+		if item.Type == "tikv" {
+			err = i.getTiKVPerfornamnceInfo(item)
+			if err != nil {
+				return errors.Trace(err)
+			}
+		}
+	}
+
+	return nil
+}

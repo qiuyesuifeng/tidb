@@ -28,7 +28,6 @@ var inspectionPersistTables = []string{
 	tableTiDBClusterKeyMetrcisInfo,
 	tableTiDBKeyMetrcisInfo,
 	tableTiKVKeyMetrcisInfo,
-	tableTiDBPerformanceInfo,
 	tableTiKVPerformanceInfo,
 }
 
@@ -117,20 +116,6 @@ const tableTiKVKeyMetrcisInfo = `CREATE TABLE %s.TIKV_KEY_METRICS_INFO (
   KV_COPROCESSOR_COUNT varchar(64) DEFAULT NULL
 )`
 
-const tableTiDBPerformanceInfo = `CREATE TABLE %s.TIDB_PERFORMANCE_INFO (
-  ID bigint(21) unsigned DEFAULT NULL,
-  TYPE varchar(64) DEFAULT NULL,
-  NAME varchar(64) DEFAULT NULL,
-  IP varchar(64) DEFAULT NULL,
-  STATUS_ADDRESS varchar(64) DEFAULT NULL,
-  QPS varchar(64) DEFAULT NULL,
-  QUERY_DURATION varchar(64) DEFAULT NULL,
-  TPS varchar(64) DEFAULT NULL,
-  TRANSACTION_DURATION varchar(64) DEFAULT NULL,
-  SLOW_QUERY_DURATION varchar(64) DEFAULT NULL,
-  EXPENSIVE_QUERY_COUNT varchar(64) DEFAULT NULL
-)`
-
 const tableTiKVPerformanceInfo = `CREATE TABLE %s.TIKV_PERFORMANCE_INFO (
   ID bigint(21) unsigned DEFAULT NULL,
   TYPE varchar(64) DEFAULT NULL,
@@ -146,9 +131,6 @@ const tableTiKVPerformanceInfo = `CREATE TABLE %s.TIKV_PERFORMANCE_INFO (
   RAFT_STORE_CPU_USAGE varchar(64) DEFAULT NULL,
   ASYNC_APPLY_CPU_USAGE varchar(64) DEFAULT NULL,
   SCHEDULER_WORKER_CPU_USAGE varchar(64) DEFAULT NULL,
-  ERR_SERVER_IS_BUSY_COUNT varchar(64) DEFAULT NULL,
-  ERR_RAFTSTORE_COUNT varchar(64) DEFAULT NULL,
-  ERR_COPROCESSOR_COUNT varchar(64) DEFAULT NULL,
-  ERR_GRPC_COUNT varchar(64) DEFAULT NULL,
-  ERR_CHANNEL_IS_FULL_COUNT varchar(64) DEFAULT NULL
+  COPROCESSOR_CPU_USAGE varchar(64) DEFAULT NULL,
+  ROCKSDB_CPU_USAGE varchar(64) DEFAULT NULL
 )`
