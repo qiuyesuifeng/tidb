@@ -47,19 +47,24 @@ type profileGraphCollector struct {
 	Rows [][]types.Datum
 }
 
-func (c *profileGraphCollector) collect(node *Node, depth int64, indent string, parentCur int64, isLastChild bool) {
-	row := []types.Datum{
-		types.NewStringDatum(prettyIdentifier(node.Name, indent, isLastChild)),
-		types.NewStringDatum(node.Percent),
-		types.NewStringDatum(strings.TrimSpace(measurement.Percentage(node.Cum, parentCur))),
-		types.NewIntDatum(depth),
-		types.NewStringDatum(node.Location),
-	}
+func (c *profileGraphCollector) collect(node *Node, depth int64, indent string, rootChild int, parentCur int64, isLastChild bool) {
+	row := types.MakeDatums(
+		prettyIdentifier(node.Name, indent, isLastChild),
+		node.Percent,
+		strings.TrimSpace(measurement.Percentage(node.Cum, parentCur)),
+		rootChild,
+		depth,
+		node.Location,
+	)
 	c.Rows = append(c.Rows, row)
 
 	indent4Child := getIndent4Child(indent, isLastChild)
 	for i, child := range node.Children {
-		c.collect(child, depth+1, indent4Child, node.Cum, i == len(node.Children)-1)
+		rc := rootChild
+		if depth == 0 {
+			rc = i + 1
+		}
+		c.collect(child, depth+1, indent4Child, rc, node.Cum, i == len(node.Children)-1)
 	}
 }
 
@@ -188,7 +193,7 @@ func profileToDatums(p *profile.Profile) ([][]types.Datum, error) {
 	}
 
 	c := profileGraphCollector{}
-	c.collect(rootNode, 0, "", config.Total, len(rootNode.Children) == 0)
+	c.collect(rootNode, 0, "", 0, config.Total, len(rootNode.Children) == 0)
 	return c.Rows, nil
 }
 
@@ -210,7 +215,10 @@ func tikvCpuProfileGraph(ctx sessionctx.Context) ([][]types.Datum, error) {
 		return nil, err
 	}
 
-	type result struct{rows [][]types.Datum; err error}
+	type result struct {
+		rows [][]types.Datum
+		err  error
+	}
 
 	var finalRows [][]types.Datum
 	wg := sync.WaitGroup{}
@@ -225,12 +233,12 @@ func tikvCpuProfileGraph(ctx sessionctx.Context) ([][]types.Datum, error) {
 		}
 
 		wg.Add(1)
-		go func ()  {
+		go func() {
 			defer wg.Done()
-				resp, err := http.Get(fmt.Sprintf("http://%s/pprof/cpu?seconds=20", statusAddr))
+			resp, err := http.Get(fmt.Sprintf("http://%s/pprof/cpu?seconds=20", statusAddr))
 			if err != nil {
 				ch <- result{err: err}
-				return 
+				return
 			}
 			defer resp.Body.Close()
 			rows, err := profileReaderToDatums(resp.Body)
