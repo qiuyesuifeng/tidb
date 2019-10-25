@@ -786,7 +786,7 @@ func (i *InspectionHelper) getTiKVPerfornamnceInfo(item ClusterItem) error {
 	}
 	rocksdbCpuUsage := fmt.Sprintf("%.2f%%", 100*getValue(result.(pmodel.Vector), instance))
 
-	sql := fmt.Sprintf(`insert into %s.TIKV_KEY_METRICS_INFO values (%d, "%s", "%s", "%s", "%s",
+	sql := fmt.Sprintf(`insert into %s.TIKV_PERFORMANCE_INFO values (%d, "%s", "%s", "%s", "%s",
 		"%s", "%s", "%s", "%s", "%s", "%s", 
 		"%s", "%s", "%s", "%s", "%s");`,
 		i.dbName, item.ID, item.Type, item.Name, item.IP, item.Address,
