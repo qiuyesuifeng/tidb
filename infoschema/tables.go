@@ -676,6 +676,7 @@ var tableTiDBClusterInfoCols = []columnInfo{
 }
 
 var tableTiDBClusterConfigCols = []columnInfo{
+	{"ID", mysql.TypeLonglong, 21, 0, nil, nil},
 	{"TYPE", mysql.TypeVarchar, 64, 0, nil, nil},
 	{"NAME", mysql.TypeVarchar, 64, 0, nil, nil},
 	{"ADDRESS", mysql.TypeVarchar, 64, 0, nil, nil},
@@ -1957,7 +1958,7 @@ func dataForClusterConfig(ctx sessionctx.Context) ([][]types.Datum, error) {
 	sql := "SELECT type, name, address, status_address FROM INFORMATION_SCHEMA.TIDB_CLUSTER_INFO"
 	rows, _, err := ctx.(sqlexec.RestrictedSQLExecutor).ExecRestrictedSQL(sql)
 	if err != nil {
-		return nil, err
+		return nil, errors.Trace(err)
 	}
 
 	type result struct {
@@ -2011,6 +2012,7 @@ func dataForClusterConfig(ctx sessionctx.Context) ([][]types.Datum, error) {
 			var rows [][]types.Datum
 			for key, val := range data {
 				rows = append(rows, types.MakeDatums(
+					0,
 					typ,
 					name,
 					address,
@@ -2024,12 +2026,19 @@ func dataForClusterConfig(ctx sessionctx.Context) ([][]types.Datum, error) {
 
 	wg.Wait()
 	close(ch)
+
+	idx := 0
 	for result := range ch {
 		if result.err != nil {
 			ctx.GetSessionVars().StmtCtx.AppendWarning(err)
 			continue
 		}
-		finalRows = append(finalRows, result.rows...)
+
+		for _, row := range result.rows {
+			row[0] = types.NewDatum(idx)
+			idx++
+			finalRows = append(finalRows, row)
+		}
 	}
 	return finalRows, nil
 }
