@@ -703,28 +703,6 @@ func (i *InspectionHelper) GetTiKVKeyMetricsInfo() error {
 	return nil
 }
 
-func (i *InspectionHelper) getTiDBPerfornamnceInfo(item ClusterItem) error {
-	return nil
-}
-
-func (i *InspectionHelper) GetTiDBPerfornamnceInfo() error {
-	err := i.initProm()
-	if err != nil {
-		return errors.Trace(err)
-	}
-
-	for _, item := range i.items {
-		if item.Type == "tidb" {
-			err = i.getTiDBPerfornamnceInfo(item)
-			if err != nil {
-				return errors.Trace(err)
-			}
-		}
-	}
-
-	return nil
-}
-
 func (i *InspectionHelper) getTiKVPerfornamnceInfo(item ClusterItem) error {
 	api := v1.NewAPI(i.promClient)
 	ctx, cancel := context.WithTimeout(context.Background(), promReadTimeout)

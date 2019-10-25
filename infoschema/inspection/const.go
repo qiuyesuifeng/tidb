@@ -28,7 +28,6 @@ var inspectionPersistTables = []string{
 	tableTiDBClusterKeyMetrcisInfo,
 	tableTiDBKeyMetrcisInfo,
 	tableTiKVKeyMetrcisInfo,
-	tableTiDBPerformanceInfo,
 	tableTiKVPerformanceInfo,
 }
 
@@ -115,20 +114,6 @@ const tableTiKVKeyMetrcisInfo = `CREATE TABLE %s.TIKV_KEY_METRICS_INFO (
   KV_PREWRITE_COUNT varchar(64) DEFAULT NULL,
   KV_COMMIT_COUNT varchar(64) DEFAULT NULL,
   KV_COPROCESSOR_COUNT varchar(64) DEFAULT NULL
-)`
-
-const tableTiDBPerformanceInfo = `CREATE TABLE %s.TIDB_PERFORMANCE_INFO (
-  ID bigint(21) unsigned DEFAULT NULL,
-  TYPE varchar(64) DEFAULT NULL,
-  NAME varchar(64) DEFAULT NULL,
-  IP varchar(64) DEFAULT NULL,
-  STATUS_ADDRESS varchar(64) DEFAULT NULL,
-  QPS varchar(64) DEFAULT NULL,
-  QUERY_DURATION varchar(64) DEFAULT NULL,
-  TPS varchar(64) DEFAULT NULL,
-  TRANSACTION_DURATION varchar(64) DEFAULT NULL,
-  SLOW_QUERY_DURATION varchar(64) DEFAULT NULL,
-  EXPENSIVE_QUERY_COUNT varchar(64) DEFAULT NULL
 )`
 
 const tableTiKVPerformanceInfo = `CREATE TABLE %s.TIKV_PERFORMANCE_INFO (
