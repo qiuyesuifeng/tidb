@@ -907,7 +907,7 @@ func (i *InspectionHelper) GetInspectionResult() error {
 		cpu := row.GetString(2)
 		cpuCount := row.GetString(3)
 
-		cpuVal, err := strconv.ParseFloat(cpu, 64)
+		cpuVal, err := strconv.ParseFloat(strings.TrimRight(cpu, "ms"), 64)
 		if err != nil {
 			return errors.Trace(err)
 		}
@@ -965,8 +965,8 @@ func (i *InspectionHelper) GetInspectionResult() error {
 			return errors.Trace(err)
 		}
 
-		if slowQueryVal > 0 {
-			metrics := fmt.Sprintf(`slow_query_count: %s`, slowQuery)
+		if slowQueryVal > 0.3 {
+			metrics := fmt.Sprintf(`slow_query_duration: %ss`, slowQuery)
 			data := "[warn]TiDB Slow Query count > 0."
 			result := Result{metrics, data}
 			results = append(results, result)
