@@ -17,6 +17,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -68,6 +69,11 @@ type InspectionHelper struct {
 	isInit        bool
 	nodeExporters map[string]string
 	promClient    api.Client
+}
+
+type Result struct {
+	Metrcis string
+	Result  string
 }
 
 func getIPfromAdress(address string) string {
@@ -447,6 +453,14 @@ func (i *InspectionHelper) GetTiDBClusterKeyMetricsInfo() error {
 	replaceStatementCount := fmt.Sprintf("%.2f", getStatementCount(result.(pmodel.Vector), "Replace"))
 	selectStatementCount := fmt.Sprintf("%.2f", getStatementCount(result.(pmodel.Vector), "Select"))
 
+	// get slow query count.
+	slowQuery := `histogram_quantile(0.90, sum(rate(tidb_server_slow_query_process_duration_seconds_bucket[1m])) by (le))`
+	result, err = api.Query(ctx, slowQuery, time.Now())
+	if err != nil {
+		return errors.Trace(err)
+	}
+	slowQueryCount := fmt.Sprintf("%.2f", result.(pmodel.Vector)[0].Value)
+
 	// get query 80/90/99/999 query duration.
 	query80 := `histogram_quantile(0.80, sum(rate(tidb_server_handle_query_duration_seconds_bucket[1m])) by (le))`
 	result, err = api.Query(ctx, query80, time.Now())
@@ -494,10 +508,10 @@ func (i *InspectionHelper) GetTiDBClusterKeyMetricsInfo() error {
 
 	clusterID := 0
 	sql := fmt.Sprintf(`insert into %s.TIDB_CLUSTER_KEY_METRICS_INFO values (%d, "%s", "%s", "%s", 
-		"%s", "%s", "%s", "%s", "%s", 
+		"%s", "%s", "%s", "%s", "%s", "%s,"
 		"%s", "%s", "%s", "%s", "%s", "%s");`,
 		i.dbName, clusterID, tidbTotalConnection, tidbTotalOKQPS, tidbTotalErrQPS,
-		insertStatementCount, updateStatementCount, deleteStatementCount, replaceStatementCount, selectStatementCount,
+		insertStatementCount, updateStatementCount, deleteStatementCount, replaceStatementCount, selectStatementCount, slowQueryCount,
 		query80Value, query95Value, query99Value, query999Value, available, capacity)
 
 	_, _, err = i.ctx.(sqlexec.RestrictedSQLExecutor).ExecRestrictedSQL(sql)
@@ -570,7 +584,7 @@ func (i *InspectionHelper) getTiDBKeyMetricsInfo(item ClusterItem) error {
 	upTime := fmt.Sprintf("%.2fhour", getValue(result.(pmodel.Vector), instance)/60/60)
 
 	sql := fmt.Sprintf(`insert into %s.TIDB_KEY_METRICS_INFO values (%d, "%s", "%s", "%s", "%s",
-		"%s", "%s", "%s", 
+		"%s", "%s", "%s",
 		"%s", "%s", "%s", "%s", "%s");`,
 		i.dbName, item.ID, item.Type, item.Name, item.IP, item.Address,
 		tidbConnection, tidbOKQPS, tidbErrQPS,
@@ -791,6 +805,180 @@ func (i *InspectionHelper) GetTiKVPerfornamnceInfo() error {
 			if err != nil {
 				return errors.Trace(err)
 			}
+		}
+	}
+
+	return nil
+}
+
+func (i *InspectionHelper) GetInspectionResult() error {
+	err := i.initProm()
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	// Inspection Alert Rules.
+	// ToDO: TIKV and PD are in the same instance.
+	// TODO: TiDB/TiKV/PD Critical Error
+	// TODO: TIKV Avaible/Capacity.
+	// TODO: TiDB/TiKV cpu usage is high.
+	// ...
+
+	results := []Result{}
+
+	// 1 TiDB and PD are in the same instance.
+	sql := fmt.Sprintf(`SELECT a.name, a.ip, b.name, b.ip FROM %s.SYSTEM_INFO a join %s.SYSTEM_INFO b on a.ip = b. ip and a.type = 'pd' and b.type = 'tidb'`, i.dbName, i.dbName)
+	rows, _, err := i.ctx.(sqlexec.RestrictedSQLExecutor).ExecRestrictedSQL(sql)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	for _, row := range rows {
+		pdName := row.GetString(0)
+		pdIP := row.GetString(1)
+		tidbName := row.GetString(2)
+		tidbIP := row.GetString(3)
+
+		metrics := fmt.Sprintf(`pd-name: %s, pd-ip: %s, tidb-name: %s, tidb-ip: %s`,
+			pdName, pdIP, tidbName, tidbIP)
+		data := "[warn]PD and TiDB are in the same instance."
+		result := Result{metrics, data}
+		results = append(results, result)
+	}
+
+	// 2 TIKV capacity is small, < 500GiB.
+	sql = fmt.Sprintf(`SELECT name, ip, capacity from %s.TIKV_KEY_METRICS_INFO`, i.dbName)
+	rows, _, err = i.ctx.(sqlexec.RestrictedSQLExecutor).ExecRestrictedSQL(sql)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	for _, row := range rows {
+		name := row.GetString(0)
+		ip := row.GetString(1)
+		capactity := row.GetString(2)
+
+		capacityVal, err := strconv.ParseFloat(strings.TrimRight(capactity, "GiB"), 64)
+		if err != nil {
+			return errors.Trace(err)
+		}
+		if capacityVal < 500 {
+			metrics := fmt.Sprintf(`tikv-name: %s, ip: %s, capacity: %s`, name, ip, capactity)
+			data := "[warn]TIKV capacity is small, < 500GiB."
+			result := Result{metrics, data}
+			results = append(results, result)
+		}
+	}
+
+	// 3 TiDB query error count > 0.
+	sql = fmt.Sprintf(`SELECT name, ip, query_err_count from %s.TIDB_KEY_METRICS_INFO`, i.dbName)
+	rows, _, err = i.ctx.(sqlexec.RestrictedSQLExecutor).ExecRestrictedSQL(sql)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	for _, row := range rows {
+		name := row.GetString(0)
+		ip := row.GetString(1)
+		queryErr := row.GetString(2)
+
+		queryErrVal, err := strconv.ParseFloat(queryErr, 64)
+		if err != nil {
+			return errors.Trace(err)
+		}
+		if queryErrVal > 0 {
+			metrics := fmt.Sprintf(`tidb-name: %s, ip: %s, query_ok_count: %s`, name, ip, queryErr)
+			data := "[warn]TiDB query error count > 0."
+			result := Result{metrics, data}
+			results = append(results, result)
+		}
+	}
+
+	// 4 TiKV cpu usage is high.
+	sql = fmt.Sprintf(`SELECT a.name, a.ip, a.cpu, b.cpu as cpu_count from %s.TIKV_KEY_METRICS_INFO a, %s.SYSTEM_INFO b where a.status_address = b.status_address and a.type = 'tikv';`, i.dbName, i.dbName)
+	rows, _, err = i.ctx.(sqlexec.RestrictedSQLExecutor).ExecRestrictedSQL(sql)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	for _, row := range rows {
+		name := row.GetString(0)
+		ip := row.GetString(1)
+		cpu := row.GetString(2)
+		cpuCount := row.GetString(3)
+
+		cpuVal, err := strconv.ParseFloat(cpu, 64)
+		if err != nil {
+			return errors.Trace(err)
+		}
+
+		cpuCountVal, err := strconv.ParseFloat(cpuCount, 64)
+		if err != nil {
+			return errors.Trace(err)
+		}
+
+		if cpuVal > 100*cpuCountVal*0.6 {
+			metrics := fmt.Sprintf(`tikv-name: %s, ip: %s, cpu_usage: %s, cpu_count: %s`, name, ip, cpu, cpuCount)
+			data := "[warn]TTiKV cpu usage is high, > (cpu_count*100*0.6)%"
+			result := Result{metrics, data}
+			results = append(results, result)
+		}
+	}
+
+	// 5 TiDB Query Duration is high, 99 query > 100ms.
+	sql = fmt.Sprintf(`SELECT name, ip, 99_query_duration from %s.TIDB_KEY_METRICS_INFO`, i.dbName)
+	rows, _, err = i.ctx.(sqlexec.RestrictedSQLExecutor).ExecRestrictedSQL(sql)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	for _, row := range rows {
+		name := row.GetString(0)
+		ip := row.GetString(1)
+		queryDuration := row.GetString(2)
+
+		queryDurationVal, err := strconv.ParseFloat(strings.TrimRight(queryDuration, "ms"), 64)
+		if err != nil {
+			return errors.Trace(err)
+		}
+
+		if queryDurationVal > 100 {
+			metrics := fmt.Sprintf(`tidb-name: %s, ip: %s, 99_query_duration: %s`, name, ip, queryDuration)
+			data := "[warn]TiDB Query Duration is high, 99 query > 100ms."
+			result := Result{metrics, data}
+			results = append(results, result)
+		}
+	}
+
+	// 7 TiDB Slow Query count > 0.
+	sql = fmt.Sprintf(`SELECT slow_query_count from %s.TIDB_CLUSTER_KEY_METRICS_INFO`, i.dbName)
+	rows, _, err = i.ctx.(sqlexec.RestrictedSQLExecutor).ExecRestrictedSQL(sql)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	for _, row := range rows {
+		slowQuery := row.GetString(0)
+
+		slowQueryVal, err := strconv.ParseFloat(slowQuery, 64)
+		if err != nil {
+			return errors.Trace(err)
+		}
+
+		if slowQueryVal > 0 {
+			metrics := fmt.Sprintf(`slow_query_count: %s`, slowQuery)
+			data := "[warn]TiDB Slow Query count > 0."
+			result := Result{metrics, data}
+			results = append(results, result)
+		}
+	}
+
+	for ii, result := range results {
+		sql = fmt.Sprintf(`insert into %s.INSPECTION_RESULT values (%d, "%s", "%s");`,
+			i.dbName, ii, result.Metrcis, result.Result)
+		_, _, err = i.ctx.(sqlexec.RestrictedSQLExecutor).ExecRestrictedSQL(sql)
+		if err != nil {
+			return errors.Trace(err)
 		}
 	}
 

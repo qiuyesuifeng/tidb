@@ -29,6 +29,7 @@ var inspectionPersistTables = []string{
 	tableTiDBKeyMetrcisInfo,
 	tableTiKVKeyMetrcisInfo,
 	tableTiKVPerformanceInfo,
+	tableInspectionResult,
 }
 
 const tablePersistTest = "CREATE TABLE %s.test_persist(" +
@@ -72,6 +73,7 @@ const tableTiDBClusterKeyMetrcisInfo = `CREATE TABLE %s.TIDB_CLUSTER_KEY_METRICS
   DELETE_COUNT varchar(64) DEFAULT NULL,
   REPLACE_COUNT varchar(64) DEFAULT NULL,
   SELECT_COUNT varchar(64) DEFAULT NULL,
+  SLOW_QUERY_COUNT varchar(64) DEFAULT NULL,
   80_QUERY_DURATION varchar(64) DEFAULT NULL,
   95_QUERY_DURATION varchar(64) DEFAULT NULL,
   99_QUERY_DURATION varchar(64) DEFAULT NULL,
@@ -133,4 +135,10 @@ const tableTiKVPerformanceInfo = `CREATE TABLE %s.TIKV_PERFORMANCE_INFO (
   SCHEDULER_WORKER_CPU_USAGE varchar(64) DEFAULT NULL,
   COPROCESSOR_CPU_USAGE varchar(64) DEFAULT NULL,
   ROCKSDB_CPU_USAGE varchar(64) DEFAULT NULL
+)`
+
+const tableInspectionResult = `CREATE TABLE %s.INSPECTION_RESULT (
+  ID bigint(21) unsigned DEFAULT NULL,
+  METRICS TEXT DEFAULT NULL,
+  RESULT TEXT DEFAULT NULL
 )`
