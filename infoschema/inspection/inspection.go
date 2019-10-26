@@ -459,7 +459,7 @@ func (i *InspectionHelper) GetTiDBClusterKeyMetricsInfo() error {
 	if err != nil {
 		return errors.Trace(err)
 	}
-	slowQueryCount := fmt.Sprintf("%.2f", result.(pmodel.Vector)[0].Value)
+	slowQueryCount := fmt.Sprintf("%.2fs", result.(pmodel.Vector)[0].Value)
 
 	// get query 80/90/99/999 query duration.
 	query80 := `histogram_quantile(0.80, sum(rate(tidb_server_handle_query_duration_seconds_bucket[1m])) by (le))`
@@ -508,7 +508,7 @@ func (i *InspectionHelper) GetTiDBClusterKeyMetricsInfo() error {
 
 	clusterID := 0
 	sql := fmt.Sprintf(`insert into %s.TIDB_CLUSTER_KEY_METRICS_INFO values (%d, "%s", "%s", "%s", 
-		"%s", "%s", "%s", "%s", "%s", "%s,"
+		"%s", "%s", "%s", "%s", "%s", "%s",
 		"%s", "%s", "%s", "%s", "%s", "%s");`,
 		i.dbName, clusterID, tidbTotalConnection, tidbTotalOKQPS, tidbTotalErrQPS,
 		insertStatementCount, updateStatementCount, deleteStatementCount, replaceStatementCount, selectStatementCount, slowQueryCount,
@@ -974,7 +974,7 @@ func (i *InspectionHelper) GetInspectionResult() error {
 	}
 
 	for ii, result := range results {
-		sql = fmt.Sprintf(`insert into %s.INSPECTION_RESULT values (%d, "%s", "%s");`,
+		sql = fmt.Sprintf(`insert into %s.RESULT values (%d, "%s", "%s");`,
 			i.dbName, ii, result.Metrcis, result.Result)
 		_, _, err = i.ctx.(sqlexec.RestrictedSQLExecutor).ExecRestrictedSQL(sql)
 		if err != nil {

@@ -137,7 +137,7 @@ const tableTiKVPerformanceInfo = `CREATE TABLE %s.TIKV_PERFORMANCE_INFO (
   ROCKSDB_CPU_USAGE varchar(64) DEFAULT NULL
 )`
 
-const tableInspectionResult = `CREATE TABLE %s.INSPECTION_RESULT (
+const tableInspectionResult = `CREATE TABLE %s.RESULT (
   ID bigint(21) unsigned DEFAULT NULL,
   METRICS TEXT DEFAULT NULL,
   RESULT TEXT DEFAULT NULL
