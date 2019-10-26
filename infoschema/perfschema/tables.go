@@ -26,12 +26,12 @@ import (
 
 const (
 	tableNameEventsStatementsSummaryByDigest = "events_statements_summary_by_digest"
-	tableNameCpuProfile                      = "events_cpu_profile"
-	tableNameMemoryProfile                   = "events_memory_profile"
-	tableNameMutexProfile                    = "events_mutex_profile"
-	tableNameAllocsProfile                   = "events_allocs_profile"
-	tableNameBlockProfile                    = "events_block_profile"
-	tableNameGoroutines                      = "events_goroutines"
+	tableNameTiDBCpuProfile                  = "events_tidb_cpu_profile"
+	tableNameTiDBMemoryProfile               = "events_tidb_memory_profile"
+	tableNameTiDBMutexProfile                = "events_tidb_mutex_profile"
+	tableNameTiDBAllocsProfile               = "events_tidb_allocs_profile"
+	tableNameTiDBBlockProfile                = "events_tidb_block_profile"
+	tableNameTiDBGoroutines                  = "events_tidb_goroutines"
 	tableNameTiKVCpuProfile                  = "events_tikv_cpu_profile"
 )
 
@@ -97,17 +97,17 @@ func (vt *perfSchemaTable) getRows(ctx sessionctx.Context, cols []*table.Column)
 	switch vt.meta.Name.O {
 	case tableNameEventsStatementsSummaryByDigest:
 		fullRows = stmtsummary.StmtSummaryByDigestMap.ToDatum()
-	case tableNameCpuProfile:
+	case tableNameTiDBCpuProfile:
 		fullRows, err = cpuProfileGraph()
-	case tableNameMemoryProfile:
+	case tableNameTiDBMemoryProfile:
 		fullRows, err = profileGraph("heap")
-	case tableNameMutexProfile:
+	case tableNameTiDBMutexProfile:
 		fullRows, err = profileGraph("mutex")
-	case tableNameAllocsProfile:
+	case tableNameTiDBAllocsProfile:
 		fullRows, err = profileGraph("allocs")
-	case tableNameBlockProfile:
+	case tableNameTiDBBlockProfile:
 		fullRows, err = profileGraph("block")
-	case tableNameGoroutines:
+	case tableNameTiDBGoroutines:
 		fullRows, err = goroutinesList()
 	case tableNameTiKVCpuProfile:
 		fullRows, err = tikvCpuProfileGraph(ctx)

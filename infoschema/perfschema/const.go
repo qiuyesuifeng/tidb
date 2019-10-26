@@ -40,12 +40,12 @@ var perfSchemaTables = []string{
 	tableStagesHistory,
 	tableStagesHistoryLong,
 	tableEventsStatementsSummaryByDigest,
-	tableCpuProfile,
-	tableMemoryProfile,
-	tableMutexProfile,
-	tableAllocsProfile,
-	tableBlockProfile,
-	tableGoroutine,
+	tableTiDBCpuProfile,
+	tableTiDBMemoryProfile,
+	tableTiDBMutexProfile,
+	tableTiDBAllocsProfile,
+	tableTiDBBlockProfile,
+	tableTiDBGoroutine,
 	tableTiKVCpuProfile,
 }
 
@@ -399,8 +399,8 @@ const tableEventsStatementsSummaryByDigest = "CREATE TABLE if not exists events_
 	"LAST_SEEN TIMESTAMP(6) NOT NULL," +
 	"QUERY_SAMPLE_TEXT LONGTEXT DEFAULT NULL);"
 
-// tableCpuProfile contains the columns name definitions for table events_cpu_profile_graph
-const tableCpuProfile = "CREATE TABLE IF NOT EXISTS " + tableNameCpuProfile + " (" +
+// tableTiDBCpuProfile contains the columns name definitions for table events_cpu_profile_graph
+const tableTiDBCpuProfile = "CREATE TABLE IF NOT EXISTS " + tableNameTiDBCpuProfile + " (" +
 	"FUNCTION VARCHAR(512) NOT NULL," +
 	"PERCENT_ABS VARCHAR(8) NOT NULL," +
 	"PERCENT_REL VARCHAR(8) NOT NULL," +
@@ -408,39 +408,39 @@ const tableCpuProfile = "CREATE TABLE IF NOT EXISTS " + tableNameCpuProfile + " 
 	"FILE VARCHAR(512) NOT NULL);"
 
 // tableMemoryProfile contains the columns name definitions for table events_memory_profile_graph
-const tableMemoryProfile = "CREATE TABLE IF NOT EXISTS " + tableNameMemoryProfile + " (" +
+const tableTiDBMemoryProfile = "CREATE TABLE IF NOT EXISTS " + tableNameTiDBMemoryProfile + " (" +
 	"FUNCTION VARCHAR(512) NOT NULL," +
 	"PERCENT_ABS VARCHAR(8) NOT NULL," +
 	"PERCENT_REL VARCHAR(8) NOT NULL," +
 	"DEPTH INT(8) NOT NULL," +
 	"FILE VARCHAR(512) NOT NULL);"
 
-// tableMutexProfile contains the columns name definitions for table events_mutex_profile_graph
-const tableMutexProfile = "CREATE TABLE IF NOT EXISTS " + tableNameMutexProfile + " (" +
+// tableTiDBMutexProfile contains the columns name definitions for table events_mutex_profile_graph
+const tableTiDBMutexProfile = "CREATE TABLE IF NOT EXISTS " + tableNameTiDBMutexProfile + " (" +
 	"FUNCTION VARCHAR(512) NOT NULL," +
 	"PERCENT_ABS VARCHAR(8) NOT NULL," +
 	"PERCENT_REL VARCHAR(8) NOT NULL," +
 	"DEPTH INT(8) NOT NULL," +
 	"FILE VARCHAR(512) NOT NULL);"
 
-// tableAllocsProfile contains the columns name definitions for table events_allocs_profile_graph
-const tableAllocsProfile = "CREATE TABLE IF NOT EXISTS " + tableNameAllocsProfile + " (" +
+// tableTiDBAllocsProfile contains the columns name definitions for table events_allocs_profile_graph
+const tableTiDBAllocsProfile = "CREATE TABLE IF NOT EXISTS " + tableNameTiDBAllocsProfile + " (" +
 	"FUNCTION VARCHAR(512) NOT NULL," +
 	"PERCENT_ABS VARCHAR(8) NOT NULL," +
 	"PERCENT_REL VARCHAR(8) NOT NULL," +
 	"DEPTH INT(8) NOT NULL," +
 	"FILE VARCHAR(512) NOT NULL);"
 
-// tableBlockProfile contains the columns name definitions for table events_block_profile_graph
-const tableBlockProfile = "CREATE TABLE IF NOT EXISTS " + tableNameBlockProfile + " (" +
+// tableTiDBBlockProfile contains the columns name definitions for table events_block_profile_graph
+const tableTiDBBlockProfile = "CREATE TABLE IF NOT EXISTS " + tableNameTiDBBlockProfile + " (" +
 	"FUNCTION VARCHAR(512) NOT NULL," +
 	"PERCENT_ABS VARCHAR(8) NOT NULL," +
 	"PERCENT_REL VARCHAR(8) NOT NULL," +
 	"DEPTH INT(8) NOT NULL," +
 	"FILE VARCHAR(512) NOT NULL);"
 
-// tableGoroutine contains the columns name definitions for table events_goroutine
-const tableGoroutine = "CREATE TABLE IF NOT EXISTS " + tableNameGoroutines + " (" +
+// tableTiDBGoroutine contains the columns name definitions for table events_goroutine
+const tableTiDBGoroutine = "CREATE TABLE IF NOT EXISTS " + tableNameTiDBGoroutines + " (" +
 	"FUNCTION VARCHAR(512) NOT NULL," +
 	"ID INT(8) NOT NULL," +
 	"STATE VARCHAR(16) NOT NULL," +
