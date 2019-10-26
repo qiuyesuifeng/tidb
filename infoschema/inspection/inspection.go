@@ -907,7 +907,7 @@ func (i *InspectionHelper) GetInspectionResult() error {
 		cpu := row.GetString(2)
 		cpuCount := row.GetString(3)
 
-		cpuVal, err := strconv.ParseFloat(strings.TrimRight(cpu, "ms"), 64)
+		cpuVal, err := strconv.ParseFloat(strings.TrimRight(cpu, "%"), 64)
 		if err != nil {
 			return errors.Trace(err)
 		}
