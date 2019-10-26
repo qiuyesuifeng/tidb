@@ -14,7 +14,7 @@
 package inspection
 
 var inspectionVirtualTables = []string{
-	tableTest,
+	// tableTest,
 }
 
 const tableTest = "CREATE TABLE %s.test_virtual(" +
@@ -22,7 +22,7 @@ const tableTest = "CREATE TABLE %s.test_virtual(" +
 	"user_id bigint(20));"
 
 var inspectionPersistTables = []string{
-	tablePersistTest,
+	// tablePersistTest,
 	tableTiDBClusterInfo,
 	tableSystemInfo,
 	tableTiDBClusterKeyMetrcisInfo,

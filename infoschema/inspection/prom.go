@@ -14,6 +14,8 @@
 package inspection
 
 import (
+	"math"
+
 	"github.com/prometheus/common/model"
 )
 
@@ -24,7 +26,7 @@ func getValue(vec model.Vector, instance string) model.SampleValue {
 		}
 	}
 
-	return model.SampleValue(-1.0)
+	return model.SampleValue(math.NaN())
 }
 
 func getStatementCount(vec model.Vector, tp string) model.SampleValue {
@@ -34,7 +36,7 @@ func getStatementCount(vec model.Vector, tp string) model.SampleValue {
 		}
 	}
 
-	return model.SampleValue(-1.0)
+	return model.SampleValue(math.NaN())
 }
 
 func getKVCount(vec model.Vector, instance string, tp string) model.SampleValue {
@@ -45,7 +47,7 @@ func getKVCount(vec model.Vector, instance string, tp string) model.SampleValue 
 		}
 	}
 
-	return model.SampleValue(-1.0)
+	return model.SampleValue(math.NaN())
 }
 
 func getKVDuration(vec model.Vector, tp string) model.SampleValue {
@@ -55,7 +57,7 @@ func getKVDuration(vec model.Vector, tp string) model.SampleValue {
 		}
 	}
 
-	return model.SampleValue(-1.0)
+	return model.SampleValue(math.NaN())
 }
 
 func getQPSCount(vec model.Vector, instance string, result string, tp string) model.SampleValue {
@@ -67,7 +69,7 @@ func getQPSCount(vec model.Vector, instance string, result string, tp string) mo
 		}
 	}
 
-	return model.SampleValue(-1.0)
+	return model.SampleValue(math.NaN())
 }
 
 func getTotalQPSCount(vec model.Vector, result string) model.SampleValue {
@@ -77,5 +79,5 @@ func getTotalQPSCount(vec model.Vector, result string) model.SampleValue {
 		}
 	}
 
-	return model.SampleValue(-1.0)
+	return model.SampleValue(math.NaN())
 }
