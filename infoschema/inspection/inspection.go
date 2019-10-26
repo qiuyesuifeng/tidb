@@ -960,7 +960,7 @@ func (i *InspectionHelper) GetInspectionResult() error {
 	for _, row := range rows {
 		slowQuery := row.GetString(0)
 
-		slowQueryVal, err := strconv.ParseFloat(slowQuery, 64)
+		slowQueryVal, err := strconv.ParseFloat(strings.TrimRight(queryDuration, "s"), 64)
 		if err != nil {
 			return errors.Trace(err)
 		}
