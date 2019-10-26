@@ -34,6 +34,8 @@ import (
 	"github.com/pingcap/tidb/util/sqlexec"
 )
 
+const profileInterval = 5
+
 type Node struct {
 	Name      string
 	Location  string
@@ -202,7 +204,7 @@ func cpuProfileGraph() ([][]types.Datum, error) {
 	if err := pprof.StartCPUProfile(buffer); err != nil {
 		panic(err)
 	}
-	time.Sleep(20 * time.Second)
+	time.Sleep(profileInterval * time.Second)
 	pprof.StopCPUProfile()
 	return profileReaderToDatums(buffer)
 }
@@ -235,7 +237,7 @@ func tikvCpuProfileGraph(ctx sessionctx.Context) ([][]types.Datum, error) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			resp, err := http.Get(fmt.Sprintf("http://%s/pprof/cpu?seconds=20", statusAddr))
+			resp, err := http.Get(fmt.Sprintf("http://%s/pprof/cpu?seconds=%d", statusAddr, profileInterval))
 			if err != nil {
 				ch <- result{err: err}
 				return

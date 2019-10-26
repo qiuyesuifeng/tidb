@@ -15,6 +15,7 @@ package executor
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"runtime"
 	"strconv"
@@ -49,6 +50,7 @@ import (
 	"github.com/pingcap/tidb/util/execdetails"
 	"github.com/pingcap/tidb/util/logutil"
 	"github.com/pingcap/tidb/util/memory"
+	"github.com/pingcap/tidb/util/sqlexec"
 	"github.com/pingcap/tidb/util/stringutil"
 	"go.uber.org/zap"
 )
@@ -1717,6 +1719,79 @@ func (e *TiDBInspectionExec) Next(ctx context.Context, req *chunk.Chunk) error {
 	idx++
 	req.AppendInt64(0, idx)
 	req.AppendString(1, "generate [RESULT] table")
+	if err := e.i.GetInspectionResult(); err != nil {
+		return errors.Trace(err)
+	} else {
+		req.AppendString(2, "OK")
+	}
+
+	// parallel retrieve profile
+	type result struct {
+		err error
+		typ string
+	}
+	wg := sync.WaitGroup{}
+	ch := make(chan result, 2)
+	profileStart := time.Now()
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		ch <- result{err: e.i.GetTiDBCpuProfileResult(), typ: "TIDB_CPU_PROFILE"}
+	}()
+	go func() {
+		defer wg.Done()
+		ch <- result{err: e.i.GetTiKVCpuProfileResult(), typ: "TIKV_CPU_PROFILE"}
+	}()
+	wg.Wait()
+	close(ch)
+	for res := range ch {
+		idx++
+		req.AppendInt64(0, idx)
+		req.AppendString(1, fmt.Sprintf("generate [%s] table", res.typ))
+		if res.err != nil {
+			return res.err
+		}
+		req.AppendString(2, "OK")
+	}
+
+	// create slow query table
+	metricsStart := profileStart.Add(-2 * time.Minute)
+	sql := fmt.Sprintf(`select time, txn_start_ts from information_schema.slow_query where time > '%s' order by query_time limit 5`,
+		metricsStart.Format("2006-01-02 15:04:05.999999"))
+	rows, _, err := e.ctx.(sqlexec.RestrictedSQLExecutor).ExecRestrictedSQL(sql)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	var slowQueryId int64
+	metrics, err := inspection.GetSlowQueryMetrcis(e.i.GetPromClient(), metricsStart, time.Now())
+	if err != nil {
+		return err
+	}
+	for i, row := range metrics {
+		data, err := json.Marshal(row.Data)
+		if err != nil {
+			return err
+		}
+		sql := fmt.Sprintf(`insert into %s.SLOW_QUERY_DETAIL values (%d, 'metrics', '%s', '%s');`,
+			e.i.GetDBName(), slowQueryId+int64(i), row.Name, string(data))
+		_, _, err = e.ctx.(sqlexec.RestrictedSQLExecutor).ExecRestrictedSQL(sql)
+		if err != nil {
+			return err
+		}
+	}
+	for _, row := range rows {
+		txnTime := row.GetTime(0)
+		txnTs := row.GetInt64(1)
+		rowCnt, err := e.i.GetSlowQueryDetail(txnTime, slowQueryId, txnTs)
+		if err != nil {
+			return err
+		}
+		slowQueryId += rowCnt
+	}
+	// generate SLOW_QUERY_DETAIL table
+	idx++
+	req.AppendInt64(0, idx)
+	req.AppendString(1, "generate [SLOW_QUERY_DETAIL] table")
 	if err := e.i.GetInspectionResult(); err != nil {
 		return errors.Trace(err)
 	} else {

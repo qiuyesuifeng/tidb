@@ -153,7 +153,7 @@ func GetSlowQueryMetrcis(client api.Client, start, end time.Time) ([]PromDatas, 
 		return nil, errors.New("Invalid Prometheus Address")
 	}
 	client, err := api.NewClient(api.Config{
-		Address: promAddr,
+		Address: fmt.Sprintf("http://%s", promAddr),
 	})
 	if err != nil {
 		return nil, errors.Trace(err)

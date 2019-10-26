@@ -30,6 +30,9 @@ var inspectionPersistTables = []string{
 	tableTiKVKeyMetrcisInfo,
 	tableTiKVPerformanceInfo,
 	tableInspectionResult,
+	tableTiDBCpuProfile,
+	tableTiKVCpuProfile,
+	tableSlowQueryDetail,
 }
 
 const tablePersistTest = "CREATE TABLE %s.test_persist(" +
@@ -142,3 +145,29 @@ const tableInspectionResult = `CREATE TABLE %s.RESULT (
   METRICS TEXT DEFAULT NULL,
   RESULT TEXT DEFAULT NULL
 )`
+
+// tableTiDBCpuProfile contains the columns name definitions for table tidb_cpu_profile
+const tableTiDBCpuProfile = "CREATE TABLE IF NOT EXISTS %s.TIDB_CPU_PROFILE (" +
+	"FUNCTION VARCHAR(512) NOT NULL," +
+	"PERCENT_ABS VARCHAR(8) NOT NULL," +
+	"PERCENT_REL VARCHAR(8) NOT NULL," +
+	"ROOT_CHILD INT(8) NOT NULL," +
+	"DEPTH INT(8) NOT NULL," +
+	"FILE VARCHAR(512) NOT NULL);"
+
+	// tableTiKVCpuProfile contains the columns name definitions for table tikv_cpu_profile
+const tableTiKVCpuProfile = "CREATE TABLE IF NOT EXISTS %s.TIKV_CPU_PROFILE (" +
+	"NAME VARCHAR(16) NOT NULL," +
+	"ADDRESS VARCHAR(64) NOT NULL," +
+	"FUNCTION VARCHAR(512) NOT NULL," +
+	"PERCENT_ABS VARCHAR(8) NOT NULL," +
+	"PERCENT_REL VARCHAR(8) NOT NULL," +
+	"ROOT_CHILD INT(8) NOT NULL," +
+	"DEPTH INT(8) NOT NULL," +
+	"FILE VARCHAR(512) NOT NULL);"
+
+const tableSlowQueryDetail = "CREATE TABLE IF NOT EXISTS %s.SLOW_QUERY_DETAIL (" +
+	"ID BIGINT(20) NOT NULL," +
+	"TYPE VARCHAR(8) NOT NULL," +
+	"NAME VARCHAR(128) NOT NULL," +
+	"DATA TEXT NOT NULL);"
