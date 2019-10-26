@@ -839,9 +839,9 @@ func (i *InspectionHelper) GetInspectionResult() error {
 		tidbName := row.GetString(2)
 		tidbIP := row.GetString(3)
 
-		metrics := fmt.Sprintf(`pd-name: %s, pd-ip: %s, tidb-name: %s, tidb-ip: %s`,
+		metrics := fmt.Sprintf(`pd-name: %s; pd-ip: %s; tidb-name: %s; tidb-ip: %s`,
 			pdName, pdIP, tidbName, tidbIP)
-		data := "[warn]PD and TiDB are in the same instance."
+		data := "[WARN] PD and TiDB are in the same instance."
 		result := Result{metrics, data}
 		results = append(results, result)
 	}
@@ -863,8 +863,8 @@ func (i *InspectionHelper) GetInspectionResult() error {
 			return errors.Trace(err)
 		}
 		if capacityVal < 500 {
-			metrics := fmt.Sprintf(`tikv-name: %s, ip: %s, capacity: %s`, name, ip, capactity)
-			data := "[warn]TIKV capacity is small, < 500GiB."
+			metrics := fmt.Sprintf(`tikv-name: %s; ip: %s; capacity: %s`, name, ip, capactity)
+			data := "[WARN] TIKV capacity is small, < 500GiB."
 			result := Result{metrics, data}
 			results = append(results, result)
 		}
@@ -887,8 +887,8 @@ func (i *InspectionHelper) GetInspectionResult() error {
 			return errors.Trace(err)
 		}
 		if queryErrVal > 0 {
-			metrics := fmt.Sprintf(`tidb-name: %s, ip: %s, query_ok_count: %s`, name, ip, queryErr)
-			data := "[warn]TiDB query error count > 0."
+			metrics := fmt.Sprintf(`tidb-name: %s; ip: %s; query_ok_count: %s`, name, ip, queryErr)
+			data := "[WARN] TiDB query error count > 0."
 			result := Result{metrics, data}
 			results = append(results, result)
 		}
@@ -918,8 +918,8 @@ func (i *InspectionHelper) GetInspectionResult() error {
 		}
 
 		if cpuVal > 100*cpuCountVal*0.6 {
-			metrics := fmt.Sprintf(`tikv-name: %s, ip: %s, cpu_usage: %s, cpu_count: %s`, name, ip, cpu, cpuCount)
-			data := "[warn]TTiKV cpu usage is high, > (cpu_count*100*0.6)%"
+			metrics := fmt.Sprintf(`tikv-name: %s; ip: %s; cpu_usage: %s; cpu_count: %s`, name, ip, cpu, cpuCount)
+			data := "[WARN] TiKV cpu usage is high, > (cpu_count*100*0.6)%"
 			result := Result{metrics, data}
 			results = append(results, result)
 		}
@@ -943,8 +943,8 @@ func (i *InspectionHelper) GetInspectionResult() error {
 		}
 
 		if queryDurationVal > 100 {
-			metrics := fmt.Sprintf(`tidb-name: %s, ip: %s, 99_query_duration: %s`, name, ip, queryDuration)
-			data := "[warn]TiDB Query Duration is high, 99 query > 100ms."
+			metrics := fmt.Sprintf(`tidb-name: %s; ip: %s; 99_query_duration: %s`, name, ip, queryDuration)
+			data := "[WARN] TiDB Query Duration is high, 99 query > 100ms."
 			result := Result{metrics, data}
 			results = append(results, result)
 		}
@@ -967,7 +967,7 @@ func (i *InspectionHelper) GetInspectionResult() error {
 
 		if slowQueryVal > 0.3 {
 			metrics := fmt.Sprintf(`slow_query_duration: %ss`, slowQuery)
-			data := "[warn]TiDB Slow Query count > 0."
+			data := "[WARN] TiDB Slow Query count > 0."
 			result := Result{metrics, data}
 			results = append(results, result)
 		}
