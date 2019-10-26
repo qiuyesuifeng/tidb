@@ -1713,10 +1713,10 @@ func (e *TiDBInspectionExec) Next(ctx context.Context, req *chunk.Chunk) error {
 		req.AppendString(2, "OK")
 	}
 
-	// generate INSPECTION_RESULT table
+	// generate RESULT table
 	idx++
 	req.AppendInt64(0, idx)
-	req.AppendString(1, "generate [INSPECTION_RESULT] table")
+	req.AppendString(1, "generate [RESULT] table")
 	if err := e.i.GetInspectionResult(); err != nil {
 		return errors.Trace(err)
 	} else {
