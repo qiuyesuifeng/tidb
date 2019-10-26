@@ -887,7 +887,7 @@ func (i *InspectionHelper) GetInspectionResult() error {
 			return errors.Trace(err)
 		}
 		if queryErrVal > 0 {
-			metrics := fmt.Sprintf(`tidb-name: %s; ip: %s; query_ok_count: %s`, name, ip, queryErr)
+			metrics := fmt.Sprintf(`tidb-name: %s; ip: %s; query_error_count: %s`, name, ip, queryErr)
 			data := "[WARN] TiDB query error count > 0."
 			result := Result{metrics, data}
 			results = append(results, result)
@@ -925,7 +925,7 @@ func (i *InspectionHelper) GetInspectionResult() error {
 		}
 	}
 
-	// 5 TiDB Query Duration is high, 99 query > 100ms.
+	// 5 TiDB Query Duration is high, .99 query > 100ms.
 	sql = fmt.Sprintf(`SELECT name, ip, 99_query_duration from %s.TIDB_KEY_METRICS_INFO`, i.dbName)
 	rows, _, err = i.ctx.(sqlexec.RestrictedSQLExecutor).ExecRestrictedSQL(sql)
 	if err != nil {
@@ -944,13 +944,13 @@ func (i *InspectionHelper) GetInspectionResult() error {
 
 		if queryDurationVal > 100 {
 			metrics := fmt.Sprintf(`tidb-name: %s; ip: %s; 99_query_duration: %s`, name, ip, queryDuration)
-			data := "[WARN] TiDB Query Duration is high, 99 query > 100ms."
+			data := "[WARN] TiDB .99 query duration is high, .99 query > 100ms."
 			result := Result{metrics, data}
 			results = append(results, result)
 		}
 	}
 
-	// 7 TiDB Slow Query count > 0.
+	// 7 TiDB Slow Query count > 0.3.
 	sql = fmt.Sprintf(`SELECT slow_query_count from %s.TIDB_CLUSTER_KEY_METRICS_INFO`, i.dbName)
 	rows, _, err = i.ctx.(sqlexec.RestrictedSQLExecutor).ExecRestrictedSQL(sql)
 	if err != nil {
@@ -965,9 +965,9 @@ func (i *InspectionHelper) GetInspectionResult() error {
 			return errors.Trace(err)
 		}
 
-		if slowQueryVal > 0.3 {
-			metrics := fmt.Sprintf(`slow_query_duration: %ss`, slowQuery)
-			data := "[WARN] TiDB Slow Query count > 0."
+		if slowQueryVal > 0.1 {
+			metrics := fmt.Sprintf(`slow_query_duration: %s`, slowQuery)
+			data := "[WARN] TiDB slow query count > 0."
 			result := Result{metrics, data}
 			results = append(results, result)
 		}
