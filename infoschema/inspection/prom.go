@@ -147,7 +147,7 @@ func getTotalQPSCount(vec model.Vector, result string) model.SampleValue {
 	return model.SampleValue(math.NaN())
 }
 
-func GetSlowQueryMetrcis(client api.Client, start, end time.Time) ([]PromDatas, error) {
+func GetSlowQueryMetrics(client api.Client, start, end time.Time) ([]PromDatas, error) {
 	promAddr := config.GetGlobalConfig().PrometheusAddr
 	if promAddr == "" {
 		return nil, errors.New("Invalid Prometheus Address")

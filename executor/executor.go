@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"runtime"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -1756,14 +1757,14 @@ func (e *TiDBInspectionExec) Next(ctx context.Context, req *chunk.Chunk) error {
 
 	// create slow query table
 	metricsStart := profileStart.Add(-2 * time.Minute)
-	sql := fmt.Sprintf(`select time, txn_start_ts from information_schema.slow_query where time > '%s' order by query_time limit 5`,
+	sql := fmt.Sprintf(`select time, txn_start_ts, query from information_schema.slow_query where time > '%s' order by query_time limit 10`,
 		metricsStart.Format("2006-01-02 15:04:05.999999"))
 	rows, _, err := e.ctx.(sqlexec.RestrictedSQLExecutor).ExecRestrictedSQL(sql)
 	if err != nil {
 		return errors.Trace(err)
 	}
 	var slowQueryId int64
-	metrics, err := inspection.GetSlowQueryMetrcis(e.i.GetPromClient(), metricsStart, time.Now())
+	metrics, err := inspection.GetSlowQueryMetrics(e.i.GetPromClient(), metricsStart, time.Now())
 	if err != nil {
 		return err
 	}
@@ -1782,7 +1783,11 @@ func (e *TiDBInspectionExec) Next(ctx context.Context, req *chunk.Chunk) error {
 	for _, row := range rows {
 		txnTime := row.GetTime(0)
 		txnTs := row.GetInt64(1)
-		rowCnt, err := e.i.GetSlowQueryDetail(txnTime, slowQueryId, txnTs)
+		query := row.GetString(2)
+		if !strings.HasPrefix(strings.TrimSpace(strings.ToLower(query)), "select") {
+			continue
+		}
+		rowCnt, err := e.i.GetSlowQueryLog(txnTime, slowQueryId, txnTs)
 		if err != nil {
 			return err
 		}

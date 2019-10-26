@@ -1008,7 +1008,7 @@ func (i *InspectionHelper) GetTiKVCpuProfileResult() error {
 	return nil
 }
 
-func (i *InspectionHelper) GetSlowQueryDetail(metricsStartTime types.Time, initId, txnTs int64) (int64, error) {
+func (i *InspectionHelper) GetSlowQueryLog(metricsStartTime types.Time, initId, txnTs int64) (int64, error) {
 	// sql := fmt.Sprintf(`select * from %s.CLUSTER_LOG where time > '%s';`, i.dbName, metricsStartTime)
 	// logs, _, err := i.ctx.(sqlexec.RestrictedSQLExecutor).ExecRestrictedSQL(sql)
 	// if err != nil {
