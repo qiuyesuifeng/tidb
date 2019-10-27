@@ -1020,7 +1020,7 @@ func (i *InspectionHelper) GetTiKVCpuProfileResult() error {
 }
 
 func (i *InspectionHelper) GetSlowQueryLog(metricsStartTime time.Time, initId, txnTs int64) (int64, error) {
-	sql := fmt.Sprintf(`select ADDRESS, CONTENT from %s.CLUSTER_LOG where time > '%s' and content like '%%%d%%';`,
+	sql := fmt.Sprintf(`select ADDRESS, TYPE, CONTENT from %s.CLUSTER_LOG where time > '%s' and content like '%%%d%%';`,
 		i.dbName, metricsStartTime.Format("2006-01-02 15:04:05.999999"), txnTs)
 	rows, _, err := i.ctx.(sqlexec.RestrictedSQLExecutor).ExecRestrictedSQL(sql)
 	if err != nil {
@@ -1029,9 +1029,10 @@ func (i *InspectionHelper) GetSlowQueryLog(metricsStartTime time.Time, initId, t
 	var rowCnt int64
 	for _, row := range rows {
 		address := row.GetString(0)
-		content := row.GetString(1)
-		sql := fmt.Sprintf(`insert into %s.SLOW_QUERY_DETAIL values (%d, 'log', '%s', '%s');`,
-			i.dbName, initId+rowCnt, address, content)
+		typ := row.GetString(1)
+		content := row.GetString(2)
+		sql := fmt.Sprintf(`insert into %s.SLOW_QUERY_DETAIL values (%d, '%s-log', '%s', '%s');`,
+			i.dbName, initId+rowCnt, typ, address, content)
 		_, _, err = i.ctx.(sqlexec.RestrictedSQLExecutor).ExecRestrictedSQL(sql)
 		if err != nil {
 			return 0, err
