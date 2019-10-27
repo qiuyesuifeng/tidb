@@ -37,7 +37,8 @@ const (
 	DateFormat = "2006-01-02"
 	TimeFormat = "2006-01-02 15:04:05"
 	// TimeFSPFormat is time format with fractional seconds precision.
-	TimeFSPFormat = "2006-01-02 15:04:05.000000"
+	TimeFSPFormat   = "2006-01-02 15:04:05.000000"
+	TimeStampLayout = "2006-01-02T15:04:05"
 )
 
 const (

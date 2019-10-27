@@ -751,6 +751,9 @@ func FormatSQL(sql string, pps variable.PreparedParams) stringutil.StringerFunc 
 
 // LogSlowQuery is used to print the slow query in the log files.
 func (a *ExecStmt) LogSlowQuery(txnTS uint64, succ bool, hasMoreResults bool) {
+	if admin, ok := a.StmtNode.(*ast.AdminStmt); ok && admin.Tp == ast.AdminInspection {
+		return
+	}
 	sessVars := a.Ctx.GetSessionVars()
 	level := log.GetLevel()
 	cfg := config.GetGlobalConfig()

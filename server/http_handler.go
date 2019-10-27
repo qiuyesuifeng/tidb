@@ -28,6 +28,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
@@ -39,6 +40,8 @@ import (
 	"github.com/pingcap/tidb/domain"
 	"github.com/pingcap/tidb/domain/infosync"
 	"github.com/pingcap/tidb/infoschema"
+	log2 "github.com/pingcap/tidb/infoschema/inspection/log"
+	"github.com/pingcap/tidb/infoschema/inspection/log/search"
 	"github.com/pingcap/tidb/kv"
 	"github.com/pingcap/tidb/meta"
 	"github.com/pingcap/tidb/session"
@@ -57,6 +60,7 @@ import (
 	"github.com/pingcap/tidb/util/pdapi"
 	log "github.com/sirupsen/logrus"
 	"go.uber.org/zap"
+	"golang.org/x/sync/syncmap"
 )
 
 const (
@@ -1599,4 +1603,263 @@ func findTableByPartitionID(schema infoschema.InfoSchema, partitionID int64) (*m
 		}
 	}
 	return nil, nil
+}
+
+var (
+	logProcessor syncmap.Map
+)
+
+type LogSequenceWrapper struct {
+	se *search.Sequence
+	pattern string
+	level string
+	filename string
+}
+
+const (
+	LOG_START_TIME = "start_time"
+	LOG_END_TIME = "end_time"
+	LOG_LIMIT = "limit"
+	LOG_PATTERN = "pattern"
+	LOG_LEVEL = "level"
+	LOG_FILENAME = "filename"
+	LOG_FD = "fd"
+)
+
+
+type logOpener struct{}
+
+func (r logOpener) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	u, err := uuid.NewUUID()
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	fd := u.String()
+	TimeStampLayout := "2006-01-02T15:04:05"
+	local, err := time.LoadLocation("Asia/Chongqing")
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+
+	startTime, _ := time.ParseInLocation(TimeStampLayout ,"1970-01-01T00:00:00", local)
+	endTime, _ := time.ParseInLocation(TimeStampLayout , "2030-01-01T00:00:00", local)
+	if startTimeStr := req.FormValue(LOG_START_TIME); startTimeStr != "" {
+		startTime, err = time.ParseInLocation(TimeStampLayout , startTimeStr, local)
+	}
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	if endTimeStr := req.FormValue(LOG_END_TIME); endTimeStr != "" {
+		endTime, err = time.ParseInLocation(TimeStampLayout , endTimeStr, local)
+	}
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+
+	var se *search.Sequence
+	se, err = search.NewSequence(log2.GetTiDBLogPath(), startTime, endTime)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	wrapper := &LogSequenceWrapper{
+		se: se,
+	}
+	if s := req.FormValue(LOG_PATTERN); s != "" {
+		wrapper.pattern = s
+	}
+
+	if s := req.FormValue(LOG_LEVEL); s != "" {
+		wrapper.level = s
+	}
+
+	if s := req.FormValue(LOG_FILENAME); s != "" {
+		wrapper.filename = s
+	}
+	logProcessor.Store(fd, wrapper)
+
+	ret := map[string]string{
+		"fd": fd,
+	}
+	writeData(w, ret)
+}
+
+type logReader struct{}
+
+func (r logReader) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	var err error
+	limit := 10
+	if s := req.FormValue("limit"); s != "" {
+		var v int64
+		v, err = strconv.ParseInt(s, 10, 10)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		limit = int(v)
+	}
+
+	fd := ""
+	if fd = req.FormValue(LOG_FD); fd == "" {
+		writeError(w, errors.New("missing or illegal parameter: `fd`"))
+	}
+
+	ww, exists := logProcessor.Load(fd)
+	if !exists {
+		writeError(w, errors.New(fmt.Sprintf("no fd found: %s", fd)))
+		return
+	}
+	pattern := ""
+	wrapper := ww.(*LogSequenceWrapper)
+	if wrapper.pattern != "" {
+		pattern = wrapper.pattern
+	}
+
+	if s := req.FormValue(LOG_PATTERN); s != "" {
+		pattern = s
+	}
+	ret := log2.TiDBLogBatch{
+		Logs: make([]*log2.LogItem, 0, 0),
+		Cnt: 0,
+	}
+	for {
+		item, err := wrapper.se.Next()
+		if err != nil {
+			if err.Error() == "EOF" {
+				break
+			} else {
+				writeError(w, err)
+				return
+			}
+		}
+		if item == nil {
+			break
+		}
+		ok := true
+		if pattern != "" {
+			ok = strings.Contains(string(item.GetContent()), pattern)
+		}
+		if wrapper.level != "" {
+			ok = wrapper.level == log2.ParseLevelToStr(item.GetLevel())
+		}
+		if wrapper.filename != "" {
+			ok = wrapper.filename == item.GetFileName()
+		}
+		if ok {
+			val := &log2.LogItem{
+				Address: fmt.Sprintf("%s:%d",config.GetGlobalConfig().Status.StatusHost, config.GetGlobalConfig().Status.StatusPort),
+				//Component: item.GetComponent(),
+				FileName: item.GetFileName(),
+				Time: item.GetTime().Unix()*1000,
+				Level: log2.ParseLevelToStr(item.GetLevel()),
+				Content:string(item.GetContent()),
+			}
+			ret.Logs = append(ret.Logs, val)
+			ret.Cnt = ret.Cnt + 1
+			if ret.Cnt >= limit {
+				break
+			}
+		}
+	}
+	writeData(w, ret)
+}
+
+/*
+func (r logReader) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	TimeStampLayout := "2006-01-02T15:04:05"
+	local, err := time.LoadLocation("Asia/Chongqing")
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+
+	startTime, _ := time.ParseInLocation(TimeStampLayout ,"1970-01-01T00:00:00", local)
+	endTime, _ := time.ParseInLocation(TimeStampLayout , "2030-01-01T00:00:00", local)
+	log.Infof("startTimeStr=%s | endTimeStr=%s", req.FormValue("startTime"), req.FormValue("endTime"))
+	if startTimeStr := req.FormValue("startTime"); startTimeStr != "" {
+		startTime, err = time.ParseInLocation(TimeStampLayout , startTimeStr, local)
+	}
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	if endTimeStr := req.FormValue("startTime"); endTimeStr != "" {
+		startTime, err = time.ParseInLocation(TimeStampLayout , endTimeStr, local)
+	}
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	limit := 10
+	if s := req.FormValue("limit"); s != "" {
+		var v int64
+		v, err = strconv.ParseInt(s, 10, 10)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		limit = int(v)
+	}
+
+	var se *search.Sequence
+	se, err = search.NewSequence(log2.GetTiDBLogPath(), startTime, endTime)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+
+	ret := log2.TiDBLogBatch{
+		Logs: make([]*log2.TiDBLogItem, 0, 0),
+		Cnt: 0,
+	}
+	for {
+		item, err := se.Next()
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		if item == nil {
+			break
+		}
+		val := &log2.TiDBLogItem{
+			Host: item.GetHost(),
+			Port: item.GetPort(),
+			Component: item.GetComponent(),
+			FileName: item.GetFileName(),
+			Time: item.GetTime(),
+			Level: item.GetLevel(),
+			Content:string(item.GetContent()),
+		}
+		ret.Logs = append(ret.Logs, val)
+		ret.Cnt = ret.Cnt + 1
+		if ret.Cnt >= limit {
+			break
+		}
+	}
+	writeData(w, ret)
+}
+ */
+
+type logCloser struct{}
+
+func (r logCloser) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	var id string
+	if id = req.FormValue(LOG_FD); id == "" {
+		writeError(w, errors.New("missing parameter: `fd`"))
+		return
+	}
+	logProcessor.Delete(id)
+	writeData(w, "success!")
 }

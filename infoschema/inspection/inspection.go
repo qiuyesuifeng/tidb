@@ -31,7 +31,6 @@ import (
 	"github.com/pingcap/tidb/sessionctx"
 	"github.com/pingcap/tidb/store/helper"
 	"github.com/pingcap/tidb/store/tikv"
-	"github.com/pingcap/tidb/types"
 	"github.com/pingcap/tidb/util"
 	"github.com/pingcap/tidb/util/sqlexec"
 	"github.com/prometheus/client_golang/api"
@@ -102,27 +101,6 @@ func (i *InspectionHelper) CreateInspectionDB() error {
 }
 
 func (i *InspectionHelper) CreateInspectionTables() error {
-	// Create inspection tables
-	for _, tbl := range inspectionVirtualTables {
-		sql := fmt.Sprintf(tbl, i.dbName)
-		stmt, err := i.p.ParseOneStmt(sql, "", "")
-		if err != nil {
-			return errors.Trace(err)
-		}
-
-		s, ok := stmt.(*ast.CreateTableStmt)
-		if !ok {
-			return errors.New(fmt.Sprintf("Fail to create inspection table. Maybe create table statment is illegal: %s", sql))
-		}
-
-		s.Table.TableInfo = &model.TableInfo{IsInspection: true, InspectionInfo: make(map[string]string)}
-		if err := domain.GetDomain(i.ctx).DDL().CreateTable(i.ctx, s); err != nil {
-			return errors.Trace(err)
-		}
-
-		i.tableNames = append(i.tableNames, s.Table.Name.O)
-	}
-
 	for _, tbl := range inspectionPersistTables {
 		sql := fmt.Sprintf(tbl, i.dbName)
 		stmt, err := i.p.ParseOneStmt(sql, "", "")
@@ -138,16 +116,6 @@ func (i *InspectionHelper) CreateInspectionTables() error {
 		}
 
 		i.tableNames = append(i.tableNames, s.Table.Name.O)
-	}
-
-	return nil
-}
-
-func (i *InspectionHelper) TestWriteTable() error {
-	sql := fmt.Sprintf("insert into %s.test_persist values (1,1), (2,2);", i.dbName)
-	_, _, err := i.ctx.(sqlexec.RestrictedSQLExecutor).ExecRestrictedSQL(sql)
-	if err != nil {
-		return errors.Trace(err)
 	}
 
 	return nil
@@ -243,6 +211,7 @@ func (i *InspectionHelper) GetClusterInfo() error {
 	if err != nil {
 		return errors.Trace(err)
 	}
+
 	for ii, storeStat := range storesStat.Stores {
 		tp := "tikv"
 		name := fmt.Sprintf("tikv-%d", ii)
@@ -812,7 +781,6 @@ func (i *InspectionHelper) GetTiKVPerfornamnceInfo() error {
 			}
 		}
 	}
-
 	return nil
 }
 
@@ -990,6 +958,49 @@ func (i *InspectionHelper) GetInspectionResult() error {
 	return nil
 }
 
+func (i *InspectionHelper) CreateClusterLogTable() error {
+	if !i.isInit {
+		return errors.New("InspectionHelper is not init.")
+	}
+
+	sql := fmt.Sprintf(tableClusterLog, i.dbName)
+	stmt, err := i.p.ParseOneStmt(sql, "", "")
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	s, ok := stmt.(*ast.CreateTableStmt)
+	if !ok {
+		return errors.New(fmt.Sprintf("Fail to create inspection table. Maybe create table statment is illegal: %s", sql))
+	}
+
+	attrs := map[string]string{
+		"type":              "log_remote",
+		"default_startTime": "2009-10-24T11:35:29",
+		"default_endTime":   "2039-10-24T11:35:47",
+		"limit":             "10000",
+	}
+
+	nodes := []string{}
+	for _, item := range i.items {
+		if item.Type == "tidb" {
+			nodes = append(nodes, fmt.Sprintf("%s@%s", "tidb", item.Address))
+		} else if item.Type == "tikv" {
+			nodes = append(nodes, fmt.Sprintf("%s@%s", "tikv", item.Address))
+		}
+	}
+
+	attrs["nodes"] = strings.Join(nodes, ";")
+	s.Table.TableInfo = &model.TableInfo{IsInspection: true, InspectionInfo: attrs}
+
+	if err := domain.GetDomain(i.ctx).DDL().CreateTable(i.ctx, s); err != nil {
+		return errors.Trace(err)
+	}
+
+	i.tableNames = append(i.tableNames, s.Table.Name.O)
+	return nil
+}
+
 func (i *InspectionHelper) GetTiDBCpuProfileResult() error {
 	sql := fmt.Sprintf(`insert into %s.TIDB_CPU_PROFILE select * from performance_schema.events_tidb_cpu_profile;`, i.dbName)
 	_, _, err := i.ctx.(sqlexec.RestrictedSQLExecutor).ExecRestrictedSQL(sql)
@@ -1008,26 +1019,26 @@ func (i *InspectionHelper) GetTiKVCpuProfileResult() error {
 	return nil
 }
 
-func (i *InspectionHelper) GetSlowQueryLog(metricsStartTime types.Time, initId, txnTs int64) (int64, error) {
-	// sql := fmt.Sprintf(`select * from %s.CLUSTER_LOG where time > '%s';`, i.dbName, metricsStartTime)
-	// logs, _, err := i.ctx.(sqlexec.RestrictedSQLExecutor).ExecRestrictedSQL(sql)
-	// if err != nil {
-	// 	return 0, err
-	// }
-	// var rowCnt int64
-	// for _, row := range logs {
-	// 	data, err := json.Marshal(row.Data)
-	// 	if err != nil {
-	// 		return 0, err
-	// 	}
-	// 	sql := fmt.Sprintf(`insert into %s.SLOW_QUERY_DETAIL values (%d, 'log', '%s', '%s');`,
-	// 		i.dbName, initId+rowCnt, row.Name, string(data))
-	// 	_, _, err = i.ctx.(sqlexec.RestrictedSQLExecutor).ExecRestrictedSQL(sql)
-	// 	if err != nil {
-	// 		return 0, err
-	// 	}
-	// 	rowCnt++
-	// }
-	// return rowCnt, err
-	return 0, nil
+func (i *InspectionHelper) GetSlowQueryLog(metricsStartTime time.Time, initId, txnTs int64) (int64, error) {
+	sql := fmt.Sprintf(`select ADDRESS, TYPE, CONTENT from %s.CLUSTER_LOG where time > '%s' and content like '%%%d%%';`,
+		i.dbName, metricsStartTime.Format("2006-01-02 15:04:05.999999"), txnTs)
+	rows, _, err := i.ctx.(sqlexec.RestrictedSQLExecutor).ExecRestrictedSQL(sql)
+	if err != nil {
+		return 0, err
+	}
+	var rowCnt int64
+	for _, row := range rows {
+		address := row.GetString(0)
+		typ := row.GetString(1)
+		content := row.GetString(2)
+		sql := fmt.Sprintf(`insert into %s.SLOW_QUERY_DETAIL values (%d, '%s-log', '%s', '%s');`,
+			i.dbName, initId+rowCnt, typ, address, content)
+		_, _, err = i.ctx.(sqlexec.RestrictedSQLExecutor).ExecRestrictedSQL(sql)
+		if err != nil {
+			return 0, err
+		}
+		rowCnt++
+	}
+
+	return rowCnt, err
 }

@@ -73,6 +73,7 @@ type PhysicalInspectionReader struct {
 	Columns     []*model.ColumnInfo
 	TableAsName *model.CIStr
 	DBName      model.CIStr
+	InspectionTableAttrs map[string]string
 }
 
 // PhysicalTableReader is the table reader in tidb.

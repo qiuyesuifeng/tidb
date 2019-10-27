@@ -1666,6 +1666,16 @@ func (e *TiDBInspectionExec) Next(ctx context.Context, req *chunk.Chunk) error {
 		req.AppendString(2, "OK")
 	}
 
+	// generate CLUSTER_LOG table
+	idx++
+	req.AppendInt64(0, idx)
+	req.AppendString(1, "generate [CLUSTER_LOG] table")
+	if err := e.i.CreateClusterLogTable(); err != nil {
+		return errors.Trace(err)
+	} else {
+		req.AppendString(2, "OK")
+	}
+
 	// generate SYSTEM_INFO table
 	idx++
 	req.AppendInt64(0, idx)
@@ -1727,79 +1737,91 @@ func (e *TiDBInspectionExec) Next(ctx context.Context, req *chunk.Chunk) error {
 	}
 
 	// parallel retrieve profile
-	type result struct {
-		err error
-		typ string
-	}
-	wg := sync.WaitGroup{}
-	ch := make(chan result, 2)
-	profileStart := time.Now()
-	wg.Add(2)
-	go func() {
-		defer wg.Done()
-		ch <- result{err: e.i.GetTiDBCpuProfileResult(), typ: "TIDB_CPU_PROFILE"}
-	}()
-	go func() {
-		defer wg.Done()
-		ch <- result{err: e.i.GetTiKVCpuProfileResult(), typ: "TIKV_CPU_PROFILE"}
-	}()
-	wg.Wait()
-	close(ch)
-	for res := range ch {
-		idx++
-		req.AppendInt64(0, idx)
-		req.AppendString(1, fmt.Sprintf("generate [%s] table", res.typ))
-		if res.err != nil {
-			return res.err
+
+	/*
+		type result struct {
+			err error
+			typ string
 		}
-		req.AppendString(2, "OK")
-	}
+		wg := sync.WaitGroup{}
+		ch := make(chan result, 2)
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			ch <- result{err: e.i.GetTiDBCpuProfileResult(), typ: "TIDB_CPU_PROFILE"}
+		}()
+		go func() {
+			defer wg.Done()
+			ch <- result{err: e.i.GetTiKVCpuProfileResult(), typ: "TIKV_CPU_PROFILE"}
+		}()
+		wg.Wait()
+		close(ch)
+		for res := range ch {
+			idx++
+			req.AppendInt64(0, idx)
+			req.AppendString(1, fmt.Sprintf("generate [%s] table", res.typ))
+			if res.err != nil {
+				return res.err
+			}
+			req.AppendString(2, "OK")
+		}
+	*/
 
 	// create slow query table
-	metricsStart := profileStart.Add(-2 * time.Minute)
-	sql := fmt.Sprintf(`select time, txn_start_ts, query from information_schema.slow_query where time > '%s' order by query_time limit 10`,
+	metricsStart := time.Now().Add(-2 * time.Minute)
+	sql := fmt.Sprintf(`select txn_start_ts, query from information_schema.slow_query where time > '%s' order by query_time limit 10`,
 		metricsStart.Format("2006-01-02 15:04:05.999999"))
 	rows, _, err := e.ctx.(sqlexec.RestrictedSQLExecutor).ExecRestrictedSQL(sql)
 	if err != nil {
 		return errors.Trace(err)
 	}
-	var slowQueryId int64
-	metrics, err := inspection.GetSlowQueryMetrics(e.i.GetPromClient(), metricsStart, time.Now())
-	if err != nil {
-		return err
-	}
-	for i, row := range metrics {
-		data, err := json.Marshal(row.Data)
-		if err != nil {
-			return err
+	var filtered []chunk.Row
+	var slowQueryId = int64(1)
+	for _, row := range rows {
+		query := row.GetString(1)
+		if !strings.HasPrefix(strings.TrimSpace(strings.ToLower(query)), "select") {
+			continue
 		}
-		sql := fmt.Sprintf(`insert into %s.SLOW_QUERY_DETAIL values (%d, 'metrics', '%s', '%s');`,
-			e.i.GetDBName(), slowQueryId+int64(i), row.Name, string(data))
+		txnTs := row.GetInt64(0)
+		sql := fmt.Sprintf(`insert into %s.SLOW_QUERY_DETAIL values (%d, 'query', '%d', '%s');`,
+			e.i.GetDBName(), slowQueryId, txnTs, query)
 		_, _, err = e.ctx.(sqlexec.RestrictedSQLExecutor).ExecRestrictedSQL(sql)
 		if err != nil {
 			return err
 		}
+		filtered = append(filtered, row)
+		slowQueryId++
 	}
-	for _, row := range rows {
-		txnTime := row.GetTime(0)
-		txnTs := row.GetInt64(1)
-		query := row.GetString(2)
-		if !strings.HasPrefix(strings.TrimSpace(strings.ToLower(query)), "select") {
-			continue
-		}
-		rowCnt, err := e.i.GetSlowQueryLog(txnTime, slowQueryId, txnTs)
+	if len(filtered) > 0 {
+		metrics, err := inspection.GetSlowQueryMetrics(e.i.GetPromClient(), metricsStart, time.Now())
 		if err != nil {
 			return err
 		}
-		slowQueryId += rowCnt
-	}
-	// generate SLOW_QUERY_DETAIL table
-	idx++
-	req.AppendInt64(0, idx)
-	req.AppendString(1, "generate [SLOW_QUERY_DETAIL] table")
-	if err := e.i.GetInspectionResult(); err != nil {
-		return errors.Trace(err)
-	} else {
+		for _, row := range metrics {
+			data, err := json.Marshal(row.Data)
+			if err != nil {
+				return err
+			}
+			sql := fmt.Sprintf(`insert into %s.SLOW_QUERY_DETAIL values (%d, 'metrics', '%s', '%s');`,
+				e.i.GetDBName(), slowQueryId, row.Name, string(data))
+			_, _, err = e.ctx.(sqlexec.RestrictedSQLExecutor).ExecRestrictedSQL(sql)
+			if err != nil {
+				return err
+			}
+			slowQueryId++
+		}
+		for _, row := range filtered {
+			txnTs := row.GetInt64(0)
+			rowCnt, err := e.i.GetSlowQueryLog(metricsStart, slowQueryId, txnTs)
+			if err != nil {
+				return err
+			}
+			slowQueryId += rowCnt
+		}
+		// generate SLOW_QUERY_DETAIL table
+		idx++
+		req.AppendInt64(0, idx)
+		req.AppendString(1, "generate [SLOW_QUERY_DETAIL] table")
 		req.AppendString(2, "OK")
 	}
 

@@ -79,6 +79,9 @@ func (s *Server) startHTTPServer() {
 	router.Handle("/settings", settingsHandler{}).Name("Settings")
 	router.Handle("/reload-config", configReloadHandler{}).Name("ConfigReload")
 	router.Handle("/binlog/recover", binlogRecover{}).Name("BinlogRecover")
+	router.Handle("/log/open", logOpener{}).Name("TiDBLogCursor-Open")
+	router.Handle("/log/next", logReader{}).Name("TiDBLogCursor-Next")
+	router.Handle("/log/close", logCloser{}).Name("TiDBLogCursor-Close")
 
 	tikvHandlerTool := s.newTikvHandlerTool()
 	router.Handle("/schema", schemaHandler{tikvHandlerTool}).Name("Schema")

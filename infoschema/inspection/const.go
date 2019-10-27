@@ -13,16 +13,15 @@
 
 package inspection
 
-var inspectionVirtualTables = []string{
-	// tableTest,
-}
-
-const tableTest = "CREATE TABLE %s.test_virtual(" +
-	"click_id bigint(20)," +
-	"user_id bigint(20));"
+const tableClusterLog = "CREATE TABLE %s.CLUSTER_LOG(" +
+	"ADDRESS varchar(64)," +
+	"TYPE varchar(64)," +
+	"FILENAME varchar(256)," +
+	"TIME timestamp," +
+	"LEVEL varchar(10)," +
+	"CONTENT text);"
 
 var inspectionPersistTables = []string{
-	// tablePersistTest,
 	tableTiDBClusterInfo,
 	tableSystemInfo,
 	tableTiDBClusterKeyMetrcisInfo,
@@ -34,10 +33,6 @@ var inspectionPersistTables = []string{
 	tableTiKVCpuProfile,
 	tableSlowQueryDetail,
 }
-
-const tablePersistTest = "CREATE TABLE %s.test_persist(" +
-	"click_id bigint(20)," +
-	"user_id bigint(20));"
 
 const tableTiDBClusterInfo = `CREATE TABLE %s.TIDB_CLUSTER_INFO (
   ID bigint(21) unsigned DEFAULT NULL,
