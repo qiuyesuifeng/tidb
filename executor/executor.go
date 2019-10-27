@@ -1788,8 +1788,8 @@ func (e *TiDBInspectionExec) Next(ctx context.Context, req *chunk.Chunk) error {
 			continue
 		}
 		txnTs := row.GetInt64(0)
-		sql := fmt.Sprintf(`insert into %s.SLOW_QUERY_DETAIL values (%d, 'query', '%d', '%s');`,
-			e.i.GetDBName(), slowQueryId, txnTs, query)
+		sql := fmt.Sprintf(`insert into %s.SLOW_QUERY_DETAIL values (%d, 'query', '%d', '%s', '');`,
+			e.i.GetDBName(), slowQueryId, txnTs, strings.ReplaceAll(query, "'", "''"))
 		_, _, err = e.ctx.(sqlexec.RestrictedSQLExecutor).ExecRestrictedSQL(sql)
 		if err != nil {
 			return err
