@@ -1521,6 +1521,10 @@ func ResetContextOfStmt(ctx sessionctx.Context, s ast.StmtNode) (err error) {
 		sc.AllowInvalidDate = vars.SQLMode.HasAllowInvalidDatesMode()
 		sc.IgnoreZeroInDate = !vars.StrictSQLMode || stmt.IgnoreErr || sc.AllowInvalidDate
 		sc.Priority = stmt.Priority
+	case *ast.AdminStmt:
+		if stmt.Tp == ast.AdminDiagnoseSlowQuery {
+			sc.InAdminDiagnose = true
+		}
 	case *ast.InsertStmt:
 		sc.InInsertStmt = true
 		// For insert statement (not for update statement), disabling the StrictSQLMode
@@ -1738,34 +1742,35 @@ func (e *TiDBInspectionExec) Next(ctx context.Context, req *chunk.Chunk) error {
 
 	// parallel retrieve profile
 
-	/*
-		type result struct {
-			err error
-			typ string
-		}
-		wg := sync.WaitGroup{}
-		ch := make(chan result, 2)
-		wg.Add(2)
-		go func() {
-			defer wg.Done()
-			ch <- result{err: e.i.GetTiDBCpuProfileResult(), typ: "TIDB_CPU_PROFILE"}
-		}()
+	type result struct {
+		err error
+		typ string
+	}
+	wg := sync.WaitGroup{}
+	ch := make(chan result, 2)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		ch <- result{err: e.i.GetTiDBCpuProfileResult(), typ: "TIDB_CPU_PROFILE"}
+	}()
+	if !e.ctx.GetSessionVars().StmtCtx.InAdminDiagnose {
+		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			ch <- result{err: e.i.GetTiKVCpuProfileResult(), typ: "TIKV_CPU_PROFILE"}
 		}()
-		wg.Wait()
-		close(ch)
-		for res := range ch {
-			idx++
-			req.AppendInt64(0, idx)
-			req.AppendString(1, fmt.Sprintf("generate [%s] table", res.typ))
-			if res.err != nil {
-				return res.err
-			}
-			req.AppendString(2, "OK")
+	}
+	wg.Wait()
+	close(ch)
+	for res := range ch {
+		idx++
+		req.AppendInt64(0, idx)
+		req.AppendString(1, fmt.Sprintf("generate [%s] table", res.typ))
+		if res.err != nil {
+			return res.err
 		}
-	*/
+		req.AppendString(2, "OK")
+	}
 
 	// create slow query table
 	metricsStart := time.Now().Add(-2 * time.Minute)
@@ -1825,6 +1830,62 @@ func (e *TiDBInspectionExec) Next(ctx context.Context, req *chunk.Chunk) error {
 		req.AppendString(2, "OK")
 	}
 
+	e.done = true
+	return nil
+}
+
+type TiDBDiagnoseExec struct {
+	baseExecutor
+	done bool
+	action string
+	i    *inspection.InspectionHelper
+}
+
+// Open implements the Executor Open interface.
+func (e *TiDBDiagnoseExec) Open(ctx context.Context) error {
+	if err := e.baseExecutor.Open(ctx); err != nil {
+		return err
+	}
+
+	// dom := domain.GetDomain(e.ctx)
+	// e.result = dom.ShowSlowQuery(e.ShowSlow)
+	e.i = inspection.NewInspectionHelper(e.ctx)
+	return nil
+}
+
+// Next implements the Executor Next interface.
+func (e *TiDBDiagnoseExec) Next(ctx context.Context, req *chunk.Chunk) error {
+	req.Reset()
+	if e.done {
+		return nil
+	}
+	if e.action == ast.AdminDiagnoseSlowQueryStart {
+		id, err := e.i.StartDiagnoseSlowQueryJob()
+		if err != nil {
+			idx := int64(0)
+			req.AppendInt64(0, idx)
+			req.AppendString(1, fmt.Sprintf("start diagnose slow query every 60 seconds"))
+			req.AppendString(2, err.Error())
+		} else {
+			req.AppendInt64(0, id)
+			req.AppendString(1, fmt.Sprintf("start diagnose slow query every 60 seconds"))
+			req.AppendString(2, "ok")
+		}
+	} else if e.action == ast.AdminDiagnoseSlowQueryStop {
+		idx := int64(0)
+		req.AppendInt64(0, idx)
+		if err := e.i.StopDiagnoseSlowQueryJob(); err != nil {
+			req.AppendString(1, fmt.Sprintf("stop diagnose slow query"))
+			req.AppendString(2, err.Error())
+		} else {
+			req.AppendString(1, fmt.Sprintf("stop diagnose slow query"))
+			req.AppendString(2, "ok")
+		}
+	} else if e.action == ast.AdminDiagnoseSlowQueryShow {
+		if id, exists := e.i.QueryDiagnoseSlowQueryJob(); exists {
+			req.AppendInt64(0, id)
+		}
+	}
 	e.done = true
 	return nil
 }

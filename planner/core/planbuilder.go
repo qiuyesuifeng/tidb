@@ -747,6 +747,12 @@ func (b *PlanBuilder) buildAdmin(ctx context.Context, as *ast.AdminStmt) (Plan, 
 		p := &TiDBInspection{}
 		p.SetSchema(buildTiDBInspectionFields())
 		ret = p
+	case ast.AdminDiagnoseSlowQuery:
+		p := &TiDBDiagnose{
+			Action: as.Action,
+		}
+		p.SetSchema(buildTiDBDiagnoseFields(as.Action))
+		ret = p
 	case ast.AdminShowDDLJobs:
 		p := LogicalShowDDLJobs{JobNumber: as.JobNumber}.Init(b.ctx)
 		p.SetSchema(buildShowDDLJobsFields())
@@ -1277,6 +1283,20 @@ func buildTiDBInspectionFields() *expression.Schema {
 	schema.Append(buildColumn("", "MSG", mysql.TypeVarchar, 256))
 	schema.Append(buildColumn("", "STATUS", mysql.TypeVarchar, 256))
 
+	return schema
+}
+
+func buildTiDBDiagnoseFields(tp string) *expression.Schema {
+	var schema *expression.Schema
+	if tp == ast.AdminDiagnoseSlowQueryShow {
+		schema = expression.NewSchema(make([]*expression.Column, 0, 1)...)
+		schema.Append(buildColumn("", "ID", mysql.TypeLonglong, 4))
+	} else {
+		schema = expression.NewSchema(make([]*expression.Column, 0, 3)...)
+		schema.Append(buildColumn("", "ID", mysql.TypeLonglong, 4))
+		schema.Append(buildColumn("", "MSG", mysql.TypeVarchar, 256))
+		schema.Append(buildColumn("", "STATUS", mysql.TypeVarchar, 256))
+	}
 	return schema
 }
 

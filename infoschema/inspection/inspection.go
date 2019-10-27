@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/pingcap/errors"
@@ -32,13 +33,26 @@ import (
 	"github.com/pingcap/tidb/store/helper"
 	"github.com/pingcap/tidb/store/tikv"
 	"github.com/pingcap/tidb/util"
+	"github.com/pingcap/tidb/util/logutil"
 	"github.com/pingcap/tidb/util/sqlexec"
 	"github.com/prometheus/client_golang/api"
 	"github.com/prometheus/client_golang/api/prometheus/v1"
 	pmodel "github.com/prometheus/common/model"
+	"go.uber.org/zap"
 )
 
 const promReadTimeout = 10 * time.Second
+
+type diagnoseWorker struct {
+	id int64
+	shouldStop chan interface{}
+	wg sync.WaitGroup
+}
+
+var (
+	diagnoseJob *diagnoseWorker
+	mu sync.Mutex
+)
 
 func NewInspectionHelper(ctx sessionctx.Context) *InspectionHelper {
 	return &InspectionHelper{
@@ -1041,4 +1055,67 @@ func (i *InspectionHelper) GetSlowQueryLog(metricsStartTime time.Time, initId, t
 	}
 
 	return rowCnt, err
+}
+
+func (i *InspectionHelper) StartDiagnoseSlowQueryJob() (id int64, err error) {
+	mu.Lock()
+	defer mu.Unlock()
+
+	if diagnoseJob != nil {
+		return diagnoseJob.id, errors.New(fmt.Sprintf("diagnose job already exists: id=%d", diagnoseJob.id))
+	}
+	diagnoseJob = &diagnoseWorker{
+		id: time.Now().UnixNano(),
+		shouldStop: make(chan interface{}),
+	}
+
+	go func() {
+		defer func() {
+			if e := recover(); e != nil {
+				err = errors.New(fmt.Sprintf("diagnose job panic: %+v", err))
+			}
+		}()
+		for {
+			//FIXME: We should create a new ctx to avoid concurrency
+			i.ctx.GetSessionVars().StmtCtx.InAdminDiagnose = true
+			_, _, err := i.ctx.(sqlexec.RestrictedSQLExecutor).ExecRestrictedSQL("admin do inspection;")
+			if err != nil {
+				logutil.BgLogger().Error("run diagnose failed: %+v", zap.Error(err))
+			}
+			select {
+			case <- diagnoseJob.shouldStop:
+				diagnoseJob.wg.Done()
+				i.ctx.GetSessionVars().StmtCtx.InAdminDiagnose = false
+				return
+			case <-time.After(1 * time.Minute):
+				continue
+			}
+		}
+	}()
+	diagnoseJob.wg.Add(1)
+
+	return diagnoseJob.id, nil
+}
+
+func (i *InspectionHelper) QueryDiagnoseSlowQueryJob() (id int64, exists bool) {
+	mu.Lock()
+	defer mu.Unlock()
+
+	if diagnoseJob == nil {
+		return 0, false
+	}
+	return diagnoseJob.id, true
+}
+
+func (i *InspectionHelper) StopDiagnoseSlowQueryJob() error {
+	mu.Lock()
+	defer mu.Unlock()
+
+	if diagnoseJob == nil {
+		return nil
+	}
+	diagnoseJob.shouldStop<-nil
+	diagnoseJob.wg.Wait()
+	diagnoseJob = nil
+	return nil
 }

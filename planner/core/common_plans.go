@@ -57,6 +57,12 @@ type TiDBInspection struct {
 	baseSchemaProducer
 }
 
+// TiDBDiagnose is for tidb diagnose information.
+type TiDBDiagnose struct {
+	baseSchemaProducer
+	Action string
+}
+
 // ShowDDLJobQueries is for showing DDL job queries sql.
 type ShowDDLJobQueries struct {
 	baseSchemaProducer

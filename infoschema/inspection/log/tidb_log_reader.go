@@ -28,7 +28,7 @@ var (
 
 type LogItem struct {
 	Address  string `json:"address"`
-	FileName string `json:"file"`
+	FileName string `json:"filename"`
 	Time     int64  `json:"time"`
 	Level    string `json:"level"`
 	Content  string `json:"content"`
