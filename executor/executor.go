@@ -1738,34 +1738,35 @@ func (e *TiDBInspectionExec) Next(ctx context.Context, req *chunk.Chunk) error {
 
 	// parallel retrieve profile
 
-	/*
-		type result struct {
-			err error
-			typ string
-		}
-		wg := sync.WaitGroup{}
-		ch := make(chan result, 2)
-		wg.Add(2)
-		go func() {
-			defer wg.Done()
-			ch <- result{err: e.i.GetTiDBCpuProfileResult(), typ: "TIDB_CPU_PROFILE"}
-		}()
+	type result struct {
+		err error
+		typ string
+	}
+	wg := sync.WaitGroup{}
+	ch := make(chan result, 2)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		ch <- result{err: e.i.GetTiDBCpuProfileResult(), typ: "TIDB_CPU_PROFILE"}
+	}()
+	if !e.ctx.GetSessionVars().StmtCtx.InAdminDiagnose {
+		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			ch <- result{err: e.i.GetTiKVCpuProfileResult(), typ: "TIKV_CPU_PROFILE"}
 		}()
-		wg.Wait()
-		close(ch)
-		for res := range ch {
-			idx++
-			req.AppendInt64(0, idx)
-			req.AppendString(1, fmt.Sprintf("generate [%s] table", res.typ))
-			if res.err != nil {
-				return res.err
-			}
-			req.AppendString(2, "OK")
+	}
+	wg.Wait()
+	close(ch)
+	for res := range ch {
+		idx++
+		req.AppendInt64(0, idx)
+		req.AppendString(1, fmt.Sprintf("generate [%s] table", res.typ))
+		if res.err != nil {
+			return res.err
 		}
-	*/
+		req.AppendString(2, "OK")
+	}
 
 	// create slow query table
 	metricsStart := time.Now().Add(-2 * time.Minute)

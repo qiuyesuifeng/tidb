@@ -71,6 +71,7 @@ type StatementContext struct {
 	BatchCheck             bool
 	InNullRejectCheck      bool
 	AllowInvalidDate       bool
+	InAdminDiagnose        bool
 	// CastStrToIntStrict is used to control the way we cast float format string to int.
 	// If ConvertStrToIntStrict is false, we convert it to a valid float string first,
 	// then cast the float string to int string. Otherwise, we cast string to integer
