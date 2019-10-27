@@ -17,6 +17,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"sort"
 	"time"
 
 	"github.com/pingcap/errors"
@@ -33,33 +34,55 @@ var promRangeStep = 15 * time.Second
 type PromDatas struct {
 	Name string
 	Data []PromData
+	Abs  string
 }
 
 type PromData struct {
-	UnixTime int64  `json:"ts"`
+	UnixTime int64  `json:"-"`
 	Time     string `json:"time"`
 	Value    string `json:"value"`
 }
 
-func getPromData(s *model.SampleStream, tp string) []PromData {
-	data := []PromData{}
+func getPromData(name string, s *model.SampleStream, tp string) PromDatas {
+	data := PromDatas{Name: name, Data: []PromData{}}
 	if s == nil {
 		return data
 	}
 
+	var values []float64
+	var total float64
+	var avg, min, p80, p90, p95, max float64
 	for _, value := range s.Values {
 		unixTime := int64(value.Timestamp) / 1000
 		time := time.Unix(unixTime, 0).Format(timeFormat)
-
 		val := ""
 		if tp == "duration" {
 			val = fmt.Sprintf("%.2fms", 1000*value.Value)
 		} else {
 			val = fmt.Sprintf("%.2f", value.Value)
 		}
-		data = append(data, PromData{unixTime, time, val})
+		data.Data = append(data.Data, PromData{unixTime, time, val})
+		if v := float64(value.Value); !math.IsNaN(v) {
+			values = append(values, v)
+			total += v
+		}
 	}
-
+	sort.Sort(sort.Float64Slice(values))
+	if count := float64(len(values)); count > 0 {
+		avg = total / count
+		min = values[0]
+		p80 = values[int(count*0.8)]
+		p90 = values[int(count*0.9)]
+		p95 = values[int(count*0.95)]
+		max = values[len(values)-1]
+	}
+	if tp == "duration" {
+		data.Abs = fmt.Sprintf("avg: %.2fms, min: %.2fms, max: %.2fms, p80: %.2fms, p90: %.2fms, p95: %.2fms",
+			avg*1000, min*1000, max*1000, p80*1000, p90*1000, p95*1000)
+	} else {
+		data.Abs = fmt.Sprintf("avg: %.2f, min: %.2f, max: %.2f, p80: %.2f, p90: %.2f, p95: %.2f",
+			avg, min, max, p80, p90, p95)
+	}
 	return data
 }
 
@@ -172,8 +195,7 @@ func GetSlowQueryMetrics(client api.Client, start, end time.Time) ([]PromDatas, 
 
 	results := []PromDatas{}
 
-	result := getPromData(data, "duration")
-	results = append(results, PromDatas{"parse_duration", result})
+	results = append(results, getPromData("parse_duration", data, "duration"))
 
 	// get compile duration.
 	query = `histogram_quantile(1, sum(rate(tidb_session_compile_duration_seconds_bucket{sql_type="general"}[1m])) by (le))`
@@ -182,8 +204,7 @@ func GetSlowQueryMetrics(client api.Client, start, end time.Time) ([]PromDatas, 
 		return nil, errors.Trace(err)
 	}
 
-	result = getPromData(data, "duration")
-	results = append(results, PromDatas{"compile_duration", result})
+	results = append(results, getPromData("compile_duration", data, "duration"))
 
 	// get region read count.
 	query = `histogram_quantile(1, sum(rate(tidb_tikvclient_txn_regions_num_bucket[1m])) by (le))`
@@ -192,8 +213,7 @@ func GetSlowQueryMetrics(client api.Client, start, end time.Time) ([]PromDatas, 
 		return nil, errors.Trace(err)
 	}
 
-	result = getPromData(data, "")
-	results = append(results, PromDatas{"read_region_count", result})
+	results = append(results, getPromData("read_region_count", data, ""))
 
 	// get instance read duration.
 	query = `histogram_quantile(1, sum(rate(tidb_tikvclient_request_seconds_bucket{type!="GC"}[1m])) by (le, instance))`
@@ -202,8 +222,7 @@ func GetSlowQueryMetrics(client api.Client, start, end time.Time) ([]PromDatas, 
 		return nil, errors.Trace(err)
 	}
 
-	result = getPromData(data, "duration")
-	results = append(results, PromDatas{"instance_read_duration", result})
+	results = append(results, getPromData("instance_read_duration", data, "duration"))
 
 	// get backoff duration.
 	query = `histogram_quantile(1, sum(rate(tidb_tikvclient_backoff_seconds_bucket[1m])) by (le))`
@@ -212,8 +231,7 @@ func GetSlowQueryMetrics(client api.Client, start, end time.Time) ([]PromDatas, 
 		return nil, errors.Trace(err)
 	}
 
-	result = getPromData(data, "duration")
-	results = append(results, PromDatas{"backoff_duration", result})
+	results = append(results, getPromData("backoff_duration", data, "duration"))
 
 	// get kv backoff duration.
 	query = `histogram_quantile(1, sum(rate(tidb_tikvclient_backoff_seconds_bucket[1m])) by (le))`
@@ -222,8 +240,7 @@ func GetSlowQueryMetrics(client api.Client, start, end time.Time) ([]PromDatas, 
 		return nil, errors.Trace(err)
 	}
 
-	result = getPromData(data, "duration")
-	results = append(results, PromDatas{"kv_backoff_duration", result})
+	results = append(results, getPromData("kv_backoff_duration", data, "duration"))
 
 	// get DistSQL duration
 	query = `histogram_quantile(1, sum(rate(tidb_distsql_handle_query_duration_seconds_bucket[1m])) by (le, type))`
@@ -232,8 +249,7 @@ func GetSlowQueryMetrics(client api.Client, start, end time.Time) ([]PromDatas, 
 		return nil, errors.Trace(err)
 	}
 
-	result = getPromData(data, "duration")
-	results = append(results, PromDatas{"dist_sql_duration", result})
+	results = append(results, getPromData("dist_sql_duration", data, "duration"))
 
 	// get scan keys count
 	query = `histogram_quantile(1, sum(rate(tidb_distsql_scan_keys_num_bucket[1m])) by (le))`
@@ -242,8 +258,7 @@ func GetSlowQueryMetrics(client api.Client, start, end time.Time) ([]PromDatas, 
 		return nil, errors.Trace(err)
 	}
 
-	result = getPromData(data, "")
-	results = append(results, PromDatas{"scan_keys_count", result})
+	results = append(results, getPromData("scan_keys_count", data, ""))
 
 	// get coprocessor count.
 	query = `sum(rate(tikv_grpc_msg_duration_seconds_count{type="coprocessor"}[1m])) by (type)`
@@ -252,8 +267,7 @@ func GetSlowQueryMetrics(client api.Client, start, end time.Time) ([]PromDatas, 
 		return nil, errors.Trace(err)
 	}
 
-	result = getPromData(data, "")
-	results = append(results, PromDatas{"coprocessor_count", result})
+	results = append(results, getPromData("coprocessor_count", data, ""))
 
 	// get coprocessor duration.
 	query = `histogram_quantile(1, sum(rate(tikv_grpc_msg_duration_seconds_bucket{ type="coprocessor"}[1m])) by (le))`
@@ -262,8 +276,7 @@ func GetSlowQueryMetrics(client api.Client, start, end time.Time) ([]PromDatas, 
 		return nil, errors.Trace(err)
 	}
 
-	result = getPromData(data, "duration")
-	results = append(results, PromDatas{"coprocessor_duration", result})
+	results = append(results, getPromData("coprocessor_duration", data, "duration"))
 
 	// get resolve lock count
 	query = `sum(rate(tikv_grpc_msg_duration_seconds_count{ type="kv_resolve_lock"}[1m]))`
@@ -272,8 +285,7 @@ func GetSlowQueryMetrics(client api.Client, start, end time.Time) ([]PromDatas, 
 		return nil, errors.Trace(err)
 	}
 
-	result = getPromData(data, "")
-	results = append(results, PromDatas{"resolve_lock_count", result})
+	results = append(results, getPromData("resolve_lock_count", data, ""))
 
 	// get resolve lock duration
 	query = `histogram_quantile(1, sum(rate(tikv_grpc_msg_duration_seconds_bucket{ type="kv_resolve_lock"}[1m])) by (le))`
@@ -282,8 +294,7 @@ func GetSlowQueryMetrics(client api.Client, start, end time.Time) ([]PromDatas, 
 		return nil, errors.Trace(err)
 	}
 
-	result = getPromData(data, "duration")
-	results = append(results, PromDatas{"resolve_lock_duration", result})
+	results = append(results, getPromData("resolve_lock_duration", data, "duration"))
 
 	// get coprocessor wait duration
 	query = `histogram_quantile(1, sum(rate(tikv_coprocessor_request_wait_seconds_bucket[1m])) by (le))`
@@ -292,8 +303,7 @@ func GetSlowQueryMetrics(client api.Client, start, end time.Time) ([]PromDatas, 
 		return nil, errors.Trace(err)
 	}
 
-	result = getPromData(data, "duration")
-	results = append(results, PromDatas{"coprocessor_wait_duration", result})
+	results = append(results, getPromData("coprocessor_wait_duration", data, "duration"))
 
 	// get coprocessor handle duration
 	query = `histogram_quantile(1, sum(rate(tikv_coprocessor_request_handle_seconds_bucket[1m])) by (le))`
@@ -302,8 +312,7 @@ func GetSlowQueryMetrics(client api.Client, start, end time.Time) ([]PromDatas, 
 		return nil, errors.Trace(err)
 	}
 
-	result = getPromData(data, "duration")
-	results = append(results, PromDatas{"coprocessor_handle_duration", result})
+	results = append(results, getPromData("coprocessor_handle_duration", data, "duration"))
 
 	return results, nil
 }
