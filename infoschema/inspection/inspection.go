@@ -1031,7 +1031,7 @@ func (i *InspectionHelper) GetSlowQueryLog(metricsStartTime time.Time, initId, t
 		address := row.GetString(0)
 		typ := row.GetString(1)
 		content := row.GetString(2)
-		sql := fmt.Sprintf(`insert into %s.SLOW_QUERY_DETAIL values (%d, '%s-log', '%s', '%s');`,
+		sql := fmt.Sprintf(`insert into %s.SLOW_QUERY_DETAIL values (%d, '%s-log', '%s', '%s', '');`,
 			i.dbName, initId+rowCnt, typ, address, content)
 		_, _, err = i.ctx.(sqlexec.RestrictedSQLExecutor).ExecRestrictedSQL(sql)
 		if err != nil {
