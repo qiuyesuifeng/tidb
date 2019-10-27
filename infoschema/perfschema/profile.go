@@ -34,7 +34,7 @@ import (
 	"github.com/pingcap/tidb/util/sqlexec"
 )
 
-const profileInterval = 5
+const profileInterval = 10
 
 type Node struct {
 	Name      string
